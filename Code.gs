@@ -431,6 +431,44 @@ function buildXlsxBlob(agentName, cycleLabel, headers, rows) {
   return zipBlob;
 }
 
+// ── Preview one agent's PDF + Excel without sending anything ─
+function previewAgentAttachments(fileId, agentName) {
+  var sourceFileId = null;
+  try {
+    var importedFile = Drive.Files.copy(
+      { title: "__TEMP_PREVIEW_ATTACH__", mimeType: MimeType.GOOGLE_SHEETS }, fileId
+    );
+    sourceFileId = importedFile.id;
+    var sourceSS = SpreadsheetApp.openById(sourceFileId);
+    var sourceSheet = sourceSS.getSheets()[0];
+    var allData = sourceSheet.getDataRange().getValues();
+    var headers = allData[0] || [];
+    var dataRows = allData.slice(1);
+    var AGENT_COL = 7; // Column H ("AgentsName") — see sendEmails()/getAgentPolicyCounts() for the same constant.
+    var agentRows = dataRows.filter(function(row) {
+      return (row[AGENT_COL] || "").toString().trim().toLowerCase() === agentName.trim().toLowerCase();
+    });
+    if (agentRows.length === 0) {
+      return { error: "No policies found for " + agentName + " in this file." };
+    }
+    var cycleLabel = getBiWeeklyCycleLabel();
+    var pdfBlob = buildPdfBlob(agentName, cycleLabel, headers, agentRows);
+    var xlsxBlob = buildXlsxBlob(agentName, cycleLabel, headers, agentRows);
+    return {
+      count: agentRows.length,
+      statusBreakdown: formatStatusBreakdown_(countByStatus_(agentRows)),
+      pdfBase64: Utilities.base64Encode(pdfBlob.getBytes()),
+      pdfName: pdfBlob.getName(),
+      xlsxBase64: Utilities.base64Encode(xlsxBlob.getBytes()),
+      xlsxName: xlsxBlob.getName()
+    };
+  } catch (e) {
+    return { error: e.message };
+  } finally {
+    if (sourceFileId) { try { DriveApp.getFileById(sourceFileId).setTrashed(true); } catch (ignore) {} }
+  }
+}
+
 // ── Send emails ──────────────────────────────────────────────
 // `override`: when true, agents already marked "Sent" for the current cycle
 // may be resent to; when false/omitted they're skipped server-side even if

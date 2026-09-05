@@ -117,3 +117,11 @@ Column I (`currstatus`) turned out to hold a mix of `Lapsed` and `Inactive` valu
 - **PDF** — the "Total Policies" meta box now includes the same breakdown.
 
 The underlying send/skip/duplicate-guard logic is unchanged — this only changes what's *displayed*, not which policies get sent (still: every row matched to that agent, regardless of status, per the "keep sending both" decision). A category other than "Lapsed"/"Inactive" (matched via case-insensitive substring) falls into "Other" so nothing is silently dropped from the counts.
+
+## Per-agent attachment preview (this session)
+
+Added a 👁 button on each Preview-tab row that generates the exact PDF and Excel a given agent would receive — without sending anything — so you can check the output before committing to a real send.
+
+- New backend function `previewAgentAttachments(fileId, agentName)`: re-reads the file, filters to that one agent (same logic as `sendEmails()`), builds the real PDF and Excel via the existing `buildPdfBlob()`/`buildXlsxBlob()`, and returns them as base64 strings.
+- The client decodes the base64 into real `Blob` objects in the browser (`base64ToBlob()`) — the PDF opens in a new tab via `URL.createObjectURL()`, the Excel downloads directly. No temporary files are created in Drive, and no email is sent.
+- Verified via the dry-run harness that `previewAgentAttachments()` produces byte-correct, independently-openable output (same `openpyxl` validation as the Excel attachment feature) and confirmed zero emails are sent when it runs.
