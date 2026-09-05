@@ -107,3 +107,13 @@ So the agent name is in **Column H (index 7)**, and Column I (`currstatus`) is t
 - Fixed the actual cause of one such silent failure: passing a raw `Date` cell value through `google.script.run` can break serialization and deliver `null` to the client instead of a real error. Diagnostic cell values are now converted to plain strings server-side before being returned.
 
 `AGENT_COL` is now `7` in both `sendEmails()` and `getAgentPolicyCounts()`. If Easipol's export layout shifts again in the future, the more durable fix would be to look up the Agent column by matching the header row's text (e.g. a column literally titled "AgentsName") instead of a hardcoded index — the diagnostic strip makes that easy to spot when it happens, but doesn't self-correct it. Flagged as a follow-up, not yet implemented.
+
+## Lapsed/Inactive status split (this session)
+
+Column I (`currstatus`) turned out to hold a mix of `Lapsed` and `Inactive` values, not just lapsed policies as originally assumed — the mailer was combining both into one number everywhere with no way to tell them apart. Added `STATUS_COL` (Column I) and shared helpers `countByStatus_()` / `formatStatusBreakdown_()` in `Code.gs`, used to show the split instead of one combined count in:
+
+- **Preview** — the top summary line and each per-agent row now show e.g. "40 Lapsed, 23 Inactive" alongside the total.
+- **Email body** — "Please find attached your policy list for this period (63 policies: 40 Lapsed, 23 Inactive)".
+- **PDF** — the "Total Policies" meta box now includes the same breakdown.
+
+The underlying send/skip/duplicate-guard logic is unchanged — this only changes what's *displayed*, not which policies get sent (still: every row matched to that agent, regardless of status, per the "keep sending both" decision). A category other than "Lapsed"/"Inactive" (matched via case-insensitive substring) falls into "Other" so nothing is silently dropped from the counts.

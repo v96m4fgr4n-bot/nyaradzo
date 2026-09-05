@@ -801,8 +801,9 @@ function loadPreview() {
       document.getElementById('previewBadge').textContent = data.agents.length;
       var unmatched = data.agents.filter(function(a){ return !a.known; });
       var unmatchedTotal = unmatched.reduce(function(s,a){ return s+a.count; }, 0);
+      var totalsBreakdown = fmtBreakdown({ lapsed: data.totalLapsed, inactive: data.totalInactive, other: data.totalOther });
       var html = '<div style="padding:10px 18px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);">'+
-        '<strong style="color:var(--navy)">'+data.total+'</strong> total policies across <strong style="color:var(--navy)">'+data.agents.length+'</strong> agents</div>';
+        '<strong style="color:var(--navy)">'+data.total+'</strong> total policies'+(totalsBreakdown?' ('+totalsBreakdown+')':'')+' across <strong style="color:var(--navy)">'+data.agents.length+'</strong> agents</div>';
       if (data.columns && data.columns.length) {
         html += '<div style="padding:10px 18px;border-bottom:1px solid var(--border);">'+
           '<div style="font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Detected columns in this file (the highlighted one is read as the agent name)</div>'+
@@ -820,10 +821,14 @@ function loadPreview() {
       }
       html += data.agents.map(function(a){
         var pct = Math.round((a.count/maxCount)*100);
+        var breakdown = fmtBreakdown(a);
         return '<div class="preview-row"'+(!a.known?' title="Not in agent list — will not be sent"':'')+'>' +
           '<div class="agent-name" style="min-width:200px;'+(a.known?'':'color:var(--danger)')+'">'+(a.known?'':'⚠ ')+escHtml(a.name)+'</div>' +
           '<div class="preview-bar-wrap"><div class="preview-bar" style="width:'+pct+'%;'+(a.known?'':'background:var(--danger)')+'"></div></div>' +
-          '<div class="preview-count">'+a.count+'</div></div>';
+          '<div style="text-align:right;min-width:110px;">'+
+          '<div class="preview-count">'+a.count+'</div>'+
+          (breakdown?'<div style="font-size:9px;color:var(--muted);white-space:nowrap;">'+escHtml(breakdown)+'</div>':'')+
+          '</div></div>';
       }).join('');
       document.getElementById('previewContent').innerHTML = html;
      } catch (clientErr) {
@@ -1006,6 +1011,13 @@ function addLog(type, msg) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────
+function fmtBreakdown(b) {
+  var parts = [];
+  if (b.lapsed) parts.push(b.lapsed + ' Lapsed');
+  if (b.inactive) parts.push(b.inactive + ' Inactive');
+  if (b.other) parts.push(b.other + ' Other');
+  return parts.join(', ');
+}
 function escHtml(str) {
   if (!str) return '';
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');

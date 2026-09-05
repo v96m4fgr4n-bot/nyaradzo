@@ -188,6 +188,28 @@ function getSendHistory() {
   }).sort(function(a, b) { return b.cycleKey.localeCompare(a.cycleKey); });
 }
 
+// ── Status breakdown (Lapsed vs Inactive) ─────────────────────
+var STATUS_COL = 8; // Column I ("currstatus") — right after AgentsName (Column H)
+
+function countByStatus_(rows) {
+  var counts = { lapsed: 0, inactive: 0, other: 0 };
+  rows.forEach(function(row) {
+    var status = (row[STATUS_COL] || "").toString().trim().toLowerCase();
+    if (status.indexOf("lapsed") !== -1) counts.lapsed++;
+    else if (status.indexOf("inactive") !== -1) counts.inactive++;
+    else counts.other++;
+  });
+  return counts;
+}
+
+function formatStatusBreakdown_(b) {
+  var parts = [];
+  if (b.lapsed) parts.push(b.lapsed + " Lapsed");
+  if (b.inactive) parts.push(b.inactive + " Inactive");
+  if (b.other) parts.push(b.other + " Other");
+  return parts.length ? parts.join(", ") : "0";
+}
+
 // ── Policy preview per agent (before sending) ────────────────
 function getAgentPolicyCounts(fileId) {
   var sourceFileId = null;
@@ -202,18 +224,28 @@ function getAgentPolicyCounts(fileId) {
     var headers = allData[0] || [];
     var dataRows = allData.slice(1);
     var AGENT_COL = 7; // Column H ("AgentsName") — confirmed via the Preview column diagnostic against the real export; Column I ("currstatus") is the policy status, not the agent.
-    var counts = {};
+    var rowsByAgent = {};
     dataRows.forEach(function(row) {
       var agent = (row[AGENT_COL] || "").toString().trim();
-      if (agent) counts[agent] = (counts[agent] || 0) + 1;
+      if (!agent) return;
+      if (!rowsByAgent[agent]) rowsByAgent[agent] = [];
+      rowsByAgent[agent].push(row);
     });
     // Flag names in the file that don't match anyone in the agent roster
     // (typos, new agents not yet added) so it's visible before sending, not after.
     var knownNames = {};
     getAgents().forEach(function(a) { knownNames[a.name.trim().toLowerCase()] = true; });
-    var result = Object.keys(counts).map(function(name) {
-      return { name: name, count: counts[name], known: !!knownNames[name.trim().toLowerCase()] };
+    var result = Object.keys(rowsByAgent).map(function(name) {
+      var rows = rowsByAgent[name];
+      var breakdown = countByStatus_(rows);
+      return {
+        name: name, count: rows.length,
+        lapsed: breakdown.lapsed, inactive: breakdown.inactive, other: breakdown.other,
+        known: !!knownNames[name.trim().toLowerCase()]
+      };
     }).sort(function(a,b) { return b.count - a.count; });
+
+    var totals = countByStatus_(dataRows);
 
     // Diagnostic: expose the actual column layout (letter, header text, a
     // sample value) so a shifted/changed export format is visible in the UI
@@ -239,7 +271,10 @@ function getAgentPolicyCounts(fileId) {
       return { letter: colLetter_(i), header: safeCell_(h), sample: safeCell_(sampleRow[i]), isAgentCol: i === AGENT_COL };
     });
 
-    return { total: dataRows.length, agents: result, columns: columns };
+    return {
+      total: dataRows.length, totalLapsed: totals.lapsed, totalInactive: totals.inactive, totalOther: totals.other,
+      agents: result, columns: columns
+    };
   } catch(e) {
     return { error: e.message };
   } finally {
@@ -253,6 +288,7 @@ function buildPdfBlob(agentName, cycleLabel, headers, rows) {
     if (val === null || val === undefined) return "";
     return val.toString().replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
+  var statusBreakdown = formatStatusBreakdown_(countByStatus_(rows));
   var headerCells = headers.map(function(h) { return "<th>" + esc(h) + "</th>"; }).join("");
   var dataRows = rows.map(function(row) {
     var cells = headers.map(function(_,i) { return "<td>" + esc(row[i]) + "</td>"; }).join("");
@@ -285,7 +321,7 @@ function buildPdfBlob(agentName, cycleLabel, headers, rows) {
     "<div class=\"meta\">" +
     "<div class=\"meta-item\"><div class=\"meta-label\">Agent Name</div><div class=\"meta-value\">" + esc(agentName) + "</div></div>" +
     "<div class=\"meta-item\"><div class=\"meta-label\">Period</div><div class=\"meta-value\">" + esc(cycleLabel) + "</div></div>" +
-    "<div class=\"meta-item\"><div class=\"meta-label\">Total Policies</div><div class=\"meta-value\">" + rows.length + "</div></div>" +
+    "<div class=\"meta-item\"><div class=\"meta-label\">Total Policies</div><div class=\"meta-value\">" + rows.length + " (" + esc(statusBreakdown) + ")</div></div>" +
     "<div class=\"meta-item\"><div class=\"meta-label\">Prepared By</div><div class=\"meta-value\">" + esc(SENDER_NAME) + "</div></div>" +
     "</div>" +
     "<table><thead><tr>" + headerCells + "</tr></thead><tbody>" + dataRows + "</tbody></table>" +
@@ -467,11 +503,12 @@ function sendEmails(selectedAgents, fileId, cycleLabel, override) {
       }
       var pdfBlob = buildPdfBlob(agent.name, label, headers, agentRows);
       var xlsxBlob = buildXlsxBlob(agent.name, label, headers, agentRows);
+      var statusBreakdown = formatStatusBreakdown_(countByStatus_(agentRows));
       var firstName = agent.name.split(" ")[0];
       var displayName = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
       var subject = "Lapsed Policy List - " + label;
       var body = "Hi " + displayName + ",\n\n" +
-        "Please find attached your lapsed policy list for this period (" + agentRows.length + " policies) as both a PDF and an editable Excel sheet.\n\n" +
+        "Please find attached your policy list for this period (" + agentRows.length + " policies: " + statusBreakdown + ") as both a PDF and an editable Excel sheet.\n\n" +
         "Kindly prioritise following up with these clients at your earliest convenience to assist with reinstatement. You can use the Excel sheet to track and mark off policies once they have been reinstated.\n\n" +
         "Should you have any queries, please do not hesitate to reach out.\n\n" +
         "Regards,\n" + SENDER_NAME + "\n" + COMPANY_NAME;
