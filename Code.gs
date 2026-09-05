@@ -7,6 +7,7 @@
 const FOLDER_NAME = "Tanya Automation";
 const SETTINGS_SHEET = "AgentEmails";
 const LOG_SHEET = "SendLog";
+const BOUNCE_LOG_SHEET = "BounceLog";
 const SENDER_NAME = "Tanyaradzwa Manyeruke";
 const COMPANY_NAME = "Nyaradzo Financial Services";
 const SUMMARY_EMAIL = "panasheb85@gmail.com"; // Post-send summary recipient
@@ -161,11 +162,15 @@ function getStatusSummary() {
 
   var sentAgents = agents.filter(function(a) { return sentThisCycle.has(a.name); });
   var pendingAgents = agents.filter(function(a) { return !sentThisCycle.has(a.name); });
+  var bouncedThisCycle = getBounceCountsByKey_()[currentKey] || {};
 
   // Attach last sent info to sent agents
   sentAgents = sentAgents.map(function(a) {
     var lastLog = logs.find(function(l) { return l.agentName === a.name && l.cycleKey === currentKey; });
-    return { name: a.name, email: a.email, sentAt: lastLog ? lastLog.timestamp : '', count: lastLog ? lastLog.count : 0 };
+    return {
+      name: a.name, email: a.email, sentAt: lastLog ? lastLog.timestamp : '', count: lastLog ? lastLog.count : 0,
+      bounced: !!bouncedThisCycle[a.name]
+    };
   });
 
   return {
@@ -181,6 +186,7 @@ function getStatusSummary() {
 function getSendHistory() {
   var logs = getSendLog(); // newest first
   var cycleMap = {};
+  var bounceCountsByKey = getBounceCountsByKey_();
 
   // Keep only the most recent log row per agent per cycle before aggregating,
   // so a resend (via the Override toggle) or a retry doesn't get counted twice.
@@ -204,8 +210,149 @@ function getSendHistory() {
         failed++;
       }
     });
-    return { cycleKey: c.cycleKey, cycleLabel: c.cycleLabel, agents: agents, policies: policies, failed: failed, timestamp: c.timestamp };
+    var bounced = 0;
+    Object.values(c.agentLogs).forEach(function(l) {
+      if (l.status === 'Sent' && bounceCountsByKey[c.cycleKey] && bounceCountsByKey[c.cycleKey][l.agentName]) bounced++;
+    });
+    return { cycleKey: c.cycleKey, cycleLabel: c.cycleLabel, agents: agents, policies: policies, failed: failed, bounced: bounced, timestamp: c.timestamp };
   }).sort(function(a, b) { return b.cycleKey.localeCompare(a.cycleKey); });
+}
+
+// ── Bounce detection ───────────────────────────────────────────
+// GmailApp.sendEmail() only reports a *send-time* failure (bad format,
+// quota, etc — already caught and logged as "Failed" in sendEmails()). A
+// true bounce (mailbox doesn't exist, is full, blocks the message) happens
+// after Gmail has already accepted the message, so Apps Script has no
+// direct API for it. The only way to detect one is to scan the sender's
+// own inbox for the delivery-failure notification Gmail (or the
+// destination server) sends back, and match its recipient address against
+// our own send log. This is best-effort: it can only see bounces that
+// have already landed in the inbox, and address/reason extraction is a
+// heuristic over free-text bounce messages, not a guaranteed parse.
+function getBounceLogSheet_() {
+  var ss = getSettingsSpreadsheet();
+  var sheet = ss.getSheetByName(BOUNCE_LOG_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(BOUNCE_LOG_SHEET);
+    sheet.appendRow(["DetectedAt", "AgentName", "Email", "CycleLabel", "CycleKey", "OriginalSentAt", "Reason", "ThreadId"]);
+  }
+  return sheet;
+}
+
+function extractBounceReason_(body) {
+  var patterns = [
+    /The error that the other server returned was:\s*\n?(.+)/i,
+    /Technical details of permanent failure:\s*\n?(.+)/i,
+    /Diagnostic-Code:\s*(.+)/i,
+    /Status:\s*(5\.\d\.\d[^\n]*)/i
+  ];
+  for (var i = 0; i < patterns.length; i++) {
+    var m = body.match(patterns[i]);
+    if (m && m[1]) return m[1].trim().substring(0, 200);
+  }
+  return "Delivery failed — see the bounce email in your inbox for the full technical reason.";
+}
+
+// Scans the inbox for delivery-failure notifications, matches each one to
+// an agent we've actually sent to (via the SendLog sheet), and records new
+// matches in the BounceLog sheet. Safe to run repeatedly — already-seen
+// threads (by Gmail thread ID) are skipped.
+function checkForBounces() {
+  var ss = getSettingsSpreadsheet();
+  var logSheet = ss.getSheetByName(LOG_SHEET);
+  var logData = logSheet.getDataRange().getValues();
+
+  // email -> [{agentName, email, cycleLabel, cycleKey, timestamp(Date)}], oldest first
+  var sentByEmail = {};
+  for (var i = 1; i < logData.length; i++) {
+    var row = logData[i];
+    if ((row[4] || "").toString() !== "Sent") continue;
+    var email = (row[2] || "").toString().trim().toLowerCase();
+    if (!email) continue;
+    if (!sentByEmail[email]) sentByEmail[email] = [];
+    sentByEmail[email].push({
+      agentName: row[1], email: row[2], cycleLabel: row[5], cycleKey: row[6],
+      timestamp: row[0] instanceof Date ? row[0] : new Date(row[0])
+    });
+  }
+
+  var bounceSheet = getBounceLogSheet_();
+  var bounceData = bounceSheet.getDataRange().getValues();
+  var alreadyProcessed = {};
+  for (var j = 1; j < bounceData.length; j++) {
+    if (bounceData[j][7]) alreadyProcessed[bounceData[j][7]] = true;
+  }
+
+  var threads = GmailApp.search(
+    '(from:mailer-daemon OR from:"Mail Delivery Subsystem" OR subject:"Delivery Status Notification (Failure)" OR subject:"Undelivered Mail Returned to Sender") newer_than:90d'
+  );
+
+  var newBounces = [];
+  var unmatchedCount = 0;
+
+  threads.forEach(function(thread) {
+    var threadId = thread.getId();
+    if (alreadyProcessed[threadId]) return;
+    var messages = thread.getMessages();
+    var msg = messages[messages.length - 1];
+    var body = msg.getPlainBody() || "";
+    var bounceDate = msg.getDate();
+
+    var emailMatches = body.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
+    var matchedEmail = null;
+    for (var k = 0; k < emailMatches.length; k++) {
+      var candidate = emailMatches[k].toLowerCase();
+      if (sentByEmail[candidate]) { matchedEmail = candidate; break; }
+    }
+    if (!matchedEmail) { unmatchedCount++; return; }
+
+    // Prefer the most recent "Sent" entry at/before the bounce date, since
+    // that's the send this bounce is almost certainly for.
+    var candidates = sentByEmail[matchedEmail];
+    var best = candidates[0];
+    candidates.forEach(function(c) {
+      if (c.timestamp <= bounceDate && c.timestamp >= best.timestamp) best = c;
+    });
+
+    var reason = extractBounceReason_(body);
+    bounceSheet.appendRow([new Date(), best.agentName, best.email, best.cycleLabel, best.cycleKey, best.timestamp, reason, threadId]);
+    newBounces.push({ agentName: best.agentName, email: best.email, cycleLabel: best.cycleLabel, reason: reason });
+  });
+
+  return { newBounces: newBounces, unmatchedCount: unmatchedCount, threadsChecked: threads.length };
+}
+
+// Persisted bounce list for the UI (most recent detection first).
+function getBounces() {
+  var sheet = getBounceLogSheet_();
+  var data = sheet.getDataRange().getValues();
+  var bounces = [];
+  for (var i = 1; i < data.length; i++) {
+    if (!data[i][1]) continue;
+    bounces.push({
+      detectedAt: Utilities.formatDate(new Date(data[i][0]), Session.getScriptTimeZone(), "dd MMM yyyy HH:mm"),
+      agentName: data[i][1],
+      email: data[i][2],
+      cycleLabel: data[i][3],
+      cycleKey: data[i][4],
+      reason: data[i][6]
+    });
+  }
+  return bounces.reverse();
+}
+
+// Cross-reference used by getSendHistory() — cycleKey -> {agentName: true}
+function getBounceCountsByKey_() {
+  var sheet = getBounceLogSheet_();
+  var data = sheet.getDataRange().getValues();
+  var map = {};
+  for (var i = 1; i < data.length; i++) {
+    var cycleKey = data[i][4], agentName = data[i][1];
+    if (!cycleKey || !agentName) continue;
+    if (!map[cycleKey]) map[cycleKey] = {};
+    map[cycleKey][agentName] = true;
+  }
+  return map;
 }
 
 // ── Status breakdown (Lapsed vs Inactive) ─────────────────────

@@ -229,6 +229,7 @@ body{background:var(--bg);color:var(--text);font-family:'Fira Sans',sans-serif;f
 .status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
 .dot-sent{background:var(--success);}
 .dot-pending{background:#d1d5db;}
+.dot-failed{background:var(--danger);}
 .status-name{font-size:12px;font-weight:500;flex:1;}
 .status-meta{font-family:'Fira Code',monospace;font-size:11px;color:var(--muted);}
 .pill{font-family:'Fira Code',monospace;font-size:9px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;padding:3px 10px;border-radius:20px;flex-shrink:0;}
@@ -476,6 +477,19 @@ body{background:var(--bg);color:var(--text);font-family:'Fira Sans',sans-serif;f
     <div style="font-size:11px;color:var(--muted)">Resets every 2 weeks with each new bi-weekly cycle.</div>
     <button class="btn btn-ghost btn-sm" onclick="loadStatus()">↻ Refresh</button>
   </div>
+
+  <div class="card" style="margin-top:14px;">
+    <div class="card-header">
+      <span class="card-title">Bounce Report</span>
+      <button class="btn btn-ghost btn-sm" id="checkBouncesBtn" onclick="checkBounces()">🔍 Check for Bounces</button>
+    </div>
+    <div style="padding:10px 18px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);">
+      Scans your inbox for delivery-failure notifications and matches them to agents you've actually sent to. Only catches bounces that have already arrived — a bounce can take a few minutes to hours to come back.
+    </div>
+    <div id="bounceList" style="max-height:300px;overflow-y:auto;-webkit-overflow-scrolling:touch;">
+      <div class="empty"><div class="empty-icon">⏳</div>Loading...</div>
+    </div>
+  </div>
 </div>
 
 <!-- PANEL: HISTORY -->
@@ -584,7 +598,7 @@ function toggleDark() {
   document.getElementById('darkBtn').textContent = isDark ? '☀️' : '🌙';
 }
 
-function loadAll() { loadAgents(); loadFiles(); loadStatus(); loadHistory(); }
+function loadAll() { loadAgents(); loadFiles(); loadStatus(); loadHistory(); loadBounces(); }
 
 function switchTab(name) {
   var names = ['send','preview','agents','status','history'];
@@ -1064,9 +1078,10 @@ function renderStatus(filter) {
   if (!items.length) { c.innerHTML='<div class="empty"><div class="empty-icon">'+(filter==='sent'?'✓':'📬')+'</div>No '+filter+' agents</div>'; return; }
   c.innerHTML = items.map(function(a){
     return '<div class="status-row" data-name="'+escHtml(a.name)+'">' +
-      '<div class="status-dot '+(a.isSent?'dot-sent':'dot-pending')+'"></div>' +
+      '<div class="status-dot '+(a.isSent?(a.bounced?'dot-failed':'dot-sent'):'dot-pending')+'"></div>' +
       '<div class="status-name">'+escHtml(a.name)+'</div>' +
       '<div class="status-meta">'+(a.isSent ? (a.count||'')+(a.count?' policies':'')+(a.sentAt?' · '+a.sentAt:'') : '')+'</div>' +
+      (a.isSent && a.bounced ? '<div class="pill pill-failed" title="A delivery-failure notification matched this agent\'s email">⚠ Bounced</div>' : '') +
       '<div class="pill '+(a.isSent?'pill-sent':'pill-pending')+'">'+(a.isSent?'Sent ✓':'Pending')+'</div>' +
       '</div>';
   }).join('');
@@ -1097,8 +1112,51 @@ function renderHistory(data) {
       '<span class="pill pill-sent">'+h.agents+' agents</span>' +
       '<span class="pill" style="background:var(--navy-dim);color:var(--navy);border:1px solid var(--navy-border)">'+h.policies+' policies</span>' +
       (h.failed>0?'<span class="pill pill-failed">'+h.failed+' failed</span>':'') +
+      (h.bounced>0?'<span class="pill pill-failed" title="Delivery-failure notifications matched to agents in this cycle">⚠ '+h.bounced+' bounced</span>':'') +
       '</div></div>';
   }).join('');
+}
+
+// ── Bounces ──────────────────────────────────────────────────
+function loadBounces() {
+  google.script.run
+    .withSuccessHandler(renderBounces)
+    .withFailureHandler(showError)
+    .getBounces();
+}
+
+function renderBounces(bounces) {
+  var c = document.getElementById('bounceList');
+  if (!bounces.length) { c.innerHTML='<div class="empty"><div class="empty-icon">✅</div>No bounces recorded yet</div>'; return; }
+  c.innerHTML = bounces.map(function(b){
+    return '<div class="status-row">' +
+      '<div class="status-dot dot-failed"></div>' +
+      '<div style="flex:1;min-width:0;">' +
+      '<div class="status-name">'+escHtml(b.agentName)+' <span style="font-weight:400;color:var(--muted);">&lt;'+escHtml(b.email)+'&gt;</span></div>' +
+      '<div class="status-meta" style="white-space:normal;">'+escHtml(b.cycleLabel)+' · '+escHtml(b.reason||'')+'</div>' +
+      '</div>' +
+      '<div class="pill pill-failed" style="flex-shrink:0;">'+escHtml(b.detectedAt)+'</div>' +
+      '</div>';
+  }).join('');
+}
+
+function checkBounces() {
+  var btn = document.getElementById('checkBouncesBtn');
+  btn.disabled = true; btn.textContent = 'Checking...';
+  google.script.run
+    .withSuccessHandler(function(res) {
+      btn.disabled = false; btn.textContent = '🔍 Check for Bounces';
+      if (res.newBounces.length) {
+        showToast(res.newBounces.length + ' new bounce(s) found', 'warn');
+      } else {
+        showToast('No new bounces (checked ' + res.threadsChecked + ' delivery-failure email(s) in your inbox)', 'success');
+      }
+      loadBounces();
+      loadStatus();
+      loadHistory();
+    })
+    .withFailureHandler(function(e) { btn.disabled = false; btn.textContent = '🔍 Check for Bounces'; showError(e); })
+    .checkForBounces();
 }
 
 // ── Log helpers ───────────────────────────────────────────────
