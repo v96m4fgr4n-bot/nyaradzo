@@ -94,6 +94,16 @@ This was validated outside of Apps Script before shipping: the exact same functi
 
 ## Agent column fix (this session)
 
-Live testing against the real Easipol export found the Preview tab grouping everything under "Inactive" / "Lapsed" instead of per agent — those are policy *status* values, not agent names. The current export has **Status in Column I and Agent in Column J**, one column later than this project's original documentation assumed (`AGENT_COL` was `8`, i.e. Column I; corrected to `9`, i.e. Column J, in both `sendEmails()` and `getAgentPolicyCounts()`).
+Live testing against the real Easipol export found the Preview tab not grouping by agent correctly. The real export's actual columns (confirmed via the column diagnostic below) are:
 
-This was diagnosed from a live screenshot, not independently re-verified against the actual file from this session (no access to the real Drive file) — confirm Preview now shows real agent names, not status values, after this deploys. If Easipol's export layout shifts again in the future, the more durable fix would be to look up the Agent column by matching the header row's text (e.g. a column literally titled "Agent") instead of a hardcoded index — flagged here as a follow-up, not yet implemented.
+| Col | A | B | C | D | E | F | G | H | I |
+|---|---|---|---|---|---|---|---|---|---|
+| Header | Policy_Number | Inception_Date | fullname | Cell_Number | EmailAddress | UsualPremium | Currency | **AgentsName** | currstatus |
+
+So the agent name is in **Column H (index 7)**, and Column I (`currstatus`) is the policy status — not what was originally documented (Column I = Agent). Went through two wrong guesses first (Column I itself, then Column J) before adding a proper diagnostic to see the real layout instead of guessing further:
+
+- `getAgentPolicyCounts()` now returns each column's letter, header text, and a sample value from the first data row; the Preview tab renders these as a small strip with the currently-assumed agent column highlighted, so a layout mismatch like this is visible immediately instead of requiring a support round-trip.
+- Fixed a real bug this surfaced along the way: the Preview success handler had no error handling, so any exception thrown while rendering left the UI stuck on "Analysing file..." forever with no feedback (`withFailureHandler` only covers server-side errors, not client-side ones in the success callback). It now catches and displays render errors plus the raw server response.
+- Fixed the actual cause of one such silent failure: passing a raw `Date` cell value through `google.script.run` can break serialization and deliver `null` to the client instead of a real error. Diagnostic cell values are now converted to plain strings server-side before being returned.
+
+`AGENT_COL` is now `7` in both `sendEmails()` and `getAgentPolicyCounts()`. If Easipol's export layout shifts again in the future, the more durable fix would be to look up the Agent column by matching the header row's text (e.g. a column literally titled "AgentsName") instead of a hardcoded index — the diagnostic strip makes that easy to spot when it happens, but doesn't self-correct it. Flagged as a follow-up, not yet implemented.

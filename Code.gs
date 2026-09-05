@@ -201,7 +201,7 @@ function getAgentPolicyCounts(fileId) {
     var allData = sourceSheet.getDataRange().getValues();
     var headers = allData[0] || [];
     var dataRows = allData.slice(1);
-    var AGENT_COL = 9; // Column J — the current Easipol export has Status in Column I, Agent in Column J (shifted one column from the originally documented layout)
+    var AGENT_COL = 7; // Column H ("AgentsName") — confirmed via the Preview column diagnostic against the real export; Column I ("currstatus") is the policy status, not the agent.
     var counts = {};
     dataRows.forEach(function(row) {
       var agent = (row[AGENT_COL] || "").toString().trim();
@@ -437,7 +437,7 @@ function sendEmails(selectedAgents, fileId, cycleLabel, override) {
     return [{ success:false, name:"ALL", error:"Could not read file: " + e.message }];
   }
 
-  var AGENT_COL = 9; // Column J — the current Easipol export has Status in Column I, Agent in Column J (shifted one column from the originally documented layout)
+  var AGENT_COL = 7; // Column H ("AgentsName") — confirmed via the Preview column diagnostic against the real export; Column I ("currstatus") is the policy status, not the agent.
 
   // Policies whose agent name in the file doesn't match anyone in the full
   // roster (typo, new agent not yet added) would otherwise never be sent to
