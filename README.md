@@ -134,3 +134,12 @@ Previously an agent's policy list mixed Lapsed and Inactive rows in whatever ord
 - **Excel** — each group gets a bold, white-on-navy merged banner row spanning all columns, built by hand-adding a second font/fill/cellXf to the workbook's `styles.xml` and a `<mergeCells>` entry per banner row in `sheet1.xml`.
 - A status with zero matching rows for that agent produces no banner at all — no empty sections.
 - Verified with the dry-run harness + `openpyxl`: banner rows render bold and merged (`A2:I2`, etc.), row order is Lapsed block → Inactive block → Other block, and the PDF HTML contains all three group classes with correct per-group counts.
+
+## Fix unmatched agent names directly from Preview (this session)
+
+The Preview tab already flagged names in the file that don't match anyone in the agent roster (highlighted red, e.g. a typo like "TYPO AGENCT"), but fixing it meant leaving the portal to add the agent manually. Added a **＋ Add** button on every unmatched row that opens an inline "email address" field right there, without leaving the tab.
+
+- New backend function `addAgent(name, email)` in `Code.gs`: validates the email format, rejects a duplicate name (case-insensitive), and appends a single row to the `AgentEmails` settings sheet — it doesn't touch the rest of the roster, unlike `saveAgents()` which replaces the whole sheet.
+- Clicking **＋ Add** reveals an inline form (email input + Save/Cancel) under that row; Enter or **Save** calls `addAgent()`, shows a toast, then reloads both the Agents tab and the Preview tab so the name immediately drops out of the "unmatched" list and its policies count toward a real agent.
+- Caught and fixed a real bug while testing this with Playwright: the inline form's `hidden` attribute was being overridden by its own inline `display:flex` style (inline styles always win), so it rendered open by default. Fixed by toggling `style.display` directly instead of mixing it with the `hidden` attribute.
+- Verified with the dry-run harness (bad email rejected, duplicate name rejected, valid add persists and flips that agent's `known` flag to `true` on the next preview) and with Playwright screenshots of the full click → fill → save → toast flow. Also re-verified the pre-existing "+ Add Agent" modal on the Agents tab still works unchanged (the new client-side function was named `confirmAddAgentFromPreview` specifically to avoid colliding with the existing `confirmAddAgent()`).

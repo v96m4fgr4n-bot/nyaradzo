@@ -80,6 +80,26 @@ function saveAgents(agentList) {
   return { success: true };
 }
 
+// Adds a single agent (used by the Preview tab's "not in agent list" fix-up
+// button) without touching the rest of the roster — safer than re-saving
+// the whole list from a stale client-side copy.
+function addAgent(name, email) {
+  name = (name || "").toString().trim();
+  email = (email || "").toString().trim();
+  if (!name) return { error: "Agent name is required." };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "Enter a valid email address for " + name + "." };
+  var ss = getSettingsSpreadsheet();
+  var sheet = ss.getSheetByName(SETTINGS_SHEET);
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if ((data[i][0] || "").toString().trim().toLowerCase() === name.toLowerCase()) {
+      return { error: "\"" + name + "\" is already in the agent list." };
+    }
+  }
+  sheet.appendRow([name, email]);
+  return { success: true, agent: { name: name, email: email } };
+}
+
 // ── Files in folder ──────────────────────────────────────────
 function getFilesInFolder() {
   var folders = DriveApp.getFoldersByName(FOLDER_NAME);

@@ -835,18 +835,30 @@ function loadPreview() {
           '⚠ '+unmatchedTotal+' polic'+(unmatchedTotal===1?'y':'ies')+' across '+unmatched.length+' name(s) not in the agent list — they will NOT be sent to anyone. '+
           'Add the agent or fix the spelling before sending.</div>';
       }
-      html += data.agents.map(function(a){
+      html += data.agents.map(function(a, idx){
         var pct = Math.round((a.count/maxCount)*100);
         var breakdown = fmtBreakdown(a);
-        return '<div class="preview-row"'+(!a.known?' title="Not in agent list — will not be sent"':'')+'>' +
+        var row = '<div class="preview-row"'+(!a.known?' title="Not in agent list — will not be sent"':'')+'>' +
           '<div class="agent-name" style="min-width:200px;'+(a.known?'':'color:var(--danger)')+'">'+(a.known?'':'⚠ ')+escHtml(a.name)+'</div>' +
           '<div class="preview-bar-wrap"><div class="preview-bar" style="width:'+pct+'%;'+(a.known?'':'background:var(--danger)')+'"></div></div>' +
           '<div style="text-align:right;min-width:110px;">'+
           '<div class="preview-count">'+a.count+'</div>'+
           (breakdown?'<div style="font-size:9px;color:var(--muted);white-space:nowrap;">'+escHtml(breakdown)+'</div>':'')+
           '</div>'+
+          (a.known ? '' :
+            '<button class="btn btn-ghost btn-sm" style="flex-shrink:0;" data-agent="'+escHtml(a.name)+'" data-idx="'+idx+'" onclick="toggleAddAgentForm(this)" title="Add \''+escHtml(a.name)+'\' to the agent list">＋ Add</button>'
+          )+
           '<button class="btn btn-ghost btn-sm" style="flex-shrink:0;" data-agent="'+escHtml(a.name)+'" onclick="previewAttachments(this.dataset.agent)" title="Preview this agent\'s PDF and Excel before sending">👁</button>'+
           '</div>';
+        if (a.known) return row;
+        row += '<div class="add-agent-form" id="addAgentForm-'+idx+'" ' +
+          'style="display:none;gap:8px;align-items:center;padding:8px 18px;background:var(--danger-dim,rgba(220,50,50,0.06));border-bottom:1px solid var(--border);">' +
+          '<span style="font-size:11px;color:var(--muted);white-space:nowrap;">Add <strong>'+escHtml(a.name)+'</strong> with email:</span>' +
+          '<input type="email" id="addAgentEmail-'+idx+'" placeholder="email@example.com" style="flex:1;min-width:0;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--card);color:var(--text);" onkeydown="if(event.key===\'Enter\')this.nextElementSibling.click()">' +
+          '<button class="btn btn-primary btn-sm" data-agent="'+escHtml(a.name)+'" data-idx="'+idx+'" onclick="confirmAddAgentFromPreview(this)">Save</button>' +
+          '<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'addAgentForm-'+idx+'\').style.display=\'none\'">Cancel</button>' +
+          '</div>';
+        return row;
       }).join('');
       document.getElementById('previewContent').innerHTML = html;
      } catch (clientErr) {
@@ -858,6 +870,32 @@ function loadPreview() {
     })
     .withFailureHandler(function(e){ document.getElementById('previewContent').innerHTML='<div class="empty"><div class="empty-icon">⚠️</div>'+escHtml(e.message)+'</div>'; })
     .getAgentPolicyCounts(fileInput.value);
+}
+
+// ── Add an unmatched name to the agent list, right from Preview ─
+function toggleAddAgentForm(btn) {
+  var idx = btn.dataset.idx;
+  var form = document.getElementById('addAgentForm-' + idx);
+  if (!form) return;
+  var opening = form.style.display === 'none';
+  form.style.display = opening ? 'flex' : 'none';
+  if (opening) document.getElementById('addAgentEmail-' + idx).focus();
+}
+
+function confirmAddAgentFromPreview(btn) {
+  var name = btn.dataset.agent, idx = btn.dataset.idx;
+  var input = document.getElementById('addAgentEmail-' + idx);
+  var email = input.value.trim();
+  if (!email) { showToast('Enter an email address first', 'warn'); input.focus(); return; }
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (res.error) { showToast(res.error, 'error'); return; }
+      showToast(name + ' added to the agent list', 'success');
+      loadAgents();
+      loadPreview();
+    })
+    .withFailureHandler(showError)
+    .addAgent(name, email);
 }
 
 // ── Preview one agent's actual PDF + Excel before sending ──────
