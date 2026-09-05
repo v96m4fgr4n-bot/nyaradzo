@@ -795,8 +795,9 @@ function loadPreview() {
   document.getElementById('previewContent').innerHTML = '<div class="empty"><div class="empty-icon">⏳</div>Analysing file...</div>';
   google.script.run
     .withSuccessHandler(function(data) {
+     try {
       if (data.error) { document.getElementById('previewContent').innerHTML='<div class="empty"><div class="empty-icon">⚠️</div>'+data.error+'</div>'; return; }
-      var maxCount = Math.max.apply(null, data.agents.map(function(a){ return a.count; }));
+      var maxCount = data.agents.length ? Math.max.apply(null, data.agents.map(function(a){ return a.count; })) : 1;
       document.getElementById('previewBadge').textContent = data.agents.length;
       var unmatched = data.agents.filter(function(a){ return !a.known; });
       var unmatchedTotal = unmatched.reduce(function(s,a){ return s+a.count; }, 0);
@@ -825,8 +826,14 @@ function loadPreview() {
           '<div class="preview-count">'+a.count+'</div></div>';
       }).join('');
       document.getElementById('previewContent').innerHTML = html;
+     } catch (clientErr) {
+      document.getElementById('previewContent').innerHTML =
+        '<div class="empty"><div class="empty-icon">⚠️</div>Preview failed to render: ' + escHtml(clientErr.message) +
+        '<div style="margin-top:10px;font-size:10px;text-align:left;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;max-height:200px;overflow:auto;white-space:pre-wrap;">' +
+        escHtml(JSON.stringify(data, null, 2)) + '</div></div>';
+     }
     })
-    .withFailureHandler(function(e){ document.getElementById('previewContent').innerHTML='<div class="empty"><div class="empty-icon">⚠️</div>'+e.message+'</div>'; })
+    .withFailureHandler(function(e){ document.getElementById('previewContent').innerHTML='<div class="empty"><div class="empty-icon">⚠️</div>'+escHtml(e.message)+'</div>'; })
     .getAgentPolicyCounts(fileInput.value);
 }
 
