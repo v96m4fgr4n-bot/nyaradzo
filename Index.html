@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <title>NFS Policy Mailer</title>
+  <style>
+    :root {
+      --navy: #1a3080;
+      --navy-dark: #122260;
+      --navy-light: #2a4090;
+      --gold: #c8a000;
+      --gold-light: #e0b800;
+
+      --bg: #f4f5f9;
+      --panel: #ffffff;
+      --text: #1a1a1a;
+      --text-muted: #666;
+      --border: #e0e2ec;
+      --success: #1e8a4c;
+      --danger: #c0392b;
+      --warn: #b8860b;
+    }
+
+    html[data-theme="dark"] {
+      --bg: #0e1430;
+      --panel: #17204a;
+      --text: #eef0fa;
+      --text-muted: #a9b0d4;
+      --border: #2a335f;
+      --navy: #3b5ad9;
+      --navy-light: #4d6bea;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    header {
+      background: var(--navy);
+      color: #fff;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    header .brand { display: flex; align-items: center; gap: 12px; }
+    header .brand img { height: 36px; }
+    header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+    header p { margin: 0; font-size: 12px; opacity: 0.85; }
+
+    .theme-toggle {
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.4);
+      color: #fff;
+      border-radius: 20px;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    nav.tabs {
+      display: flex;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      overflow-x: auto;
+    }
+
+    nav.tabs button {
+      background: none;
+      border: none;
+      padding: 14px 18px;
+      font-size: 14px;
+      cursor: pointer;
+      color: var(--text-muted);
+      border-bottom: 3px solid transparent;
+      white-space: nowrap;
+    }
+
+    nav.tabs button.active {
+      color: var(--navy);
+      border-bottom-color: var(--gold);
+      font-weight: 600;
+    }
+
+    main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .card h2 { margin-top: 0; font-size: 16px; color: var(--navy); }
+
+    label { font-size: 13px; font-weight: 600; display: block; margin-bottom: 6px; }
+
+    select, input[type="text"], input[type="email"], textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+    .row > div { flex: 1; min-width: 220px; }
+
+    .btn {
+      display: inline-block;
+      padding: 9px 18px;
+      border-radius: 6px;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-primary { background: var(--gold); color: #1a1a1a; }
+    .btn-primary:hover { background: var(--gold-light); }
+    .btn-secondary { background: var(--navy); color: #fff; }
+    .btn-secondary:hover { background: var(--navy-light); }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .agent-list {
+      max-height: 340px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .agent-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .agent-row:last-child { border-bottom: none; }
+    .agent-row.disabled { opacity: 0.5; }
+    .agent-row .name { flex: 1; }
+    .tag {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: var(--border);
+      color: var(--text-muted);
+    }
+    .tag.sent { background: rgba(30,138,76,0.15); color: var(--success); }
+
+    #logPanel {
+      background: var(--navy-dark);
+      color: #d9e0ff;
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      border-radius: 8px;
+      padding: 14px;
+      height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    th { background: var(--navy); color: #fff; }
+    tr:hover td { background: rgba(0,0,0,0.02); }
+
+    .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12px; }
+    .bar-row .label { width: 180px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bar-track { flex: 1; background: var(--border); border-radius: 4px; height: 16px; overflow: hidden; }
+    .bar-fill { background: var(--navy); height: 100%; border-radius: 4px; }
+    .bar-count { width: 40px; text-align: right; flex-shrink: 0; }
+
+    .status-columns { display: flex; gap: 20px; flex-wrap: wrap; }
+    .status-columns > div { flex: 1; min-width: 260px; }
+
+    .modal-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: var(--panel);
+      border-radius: 10px;
+      padding: 24px;
+      width: 360px;
+      max-width: 90vw;
+    }
+    .modal h3 { margin-top: 0; color: var(--navy); }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+    .empty { color: var(--text-muted); font-size: 13px; padding: 12px 0; }
+    .toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" onerror="this.style.display='none'" alt="NFS logo">
+      <div>
+        <h1>NFS Policy Mailer</h1>
+        <p>Nyaradzo Financial Services — bi-weekly lapsed policy distribution</p>
+      </div>
+    </div>
+    <button class="theme-toggle" onclick="toggleDark()">🌓 Theme</button>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="send">Send</button>
+    <button class="tab-btn" data-tab="preview">Preview</button>
+    <button class="tab-btn" data-tab="agents">Agents</button>
+    <button class="tab-btn" data-tab="status">Status</button>
+    <button class="tab-btn" data-tab="history">History</button>
+  </nav>
+
+  <main>
+
+    <!-- SEND TAB -->
+    <section id="tab-send" class="tab-panel active">
+      <div class="card">
+        <h2>Send Cycle</h2>
+        <div class="row">
+          <div>
+            <label for="fileSelect">Excel file (Tanya Automation folder)</label>
+            <select id="fileSelect"></select>
+          </div>
+          <div>
+            <label>Cycle</label>
+            <input type="text" id="cycleLabelDisplay" disabled>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button class="btn btn-outline" onclick="selectAllAgents(true)">Select All</button>
+          <button class="btn btn-outline" onclick="selectAllAgents(false)">Select None</button>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin:0;">
+            <input type="checkbox" id="overrideCheck" onchange="toggleOverride(this.checked)">
+            Allow resending to already-sent agents
+          </label>
+        </div>
+        <div id="agentSendList" class="agent-list"></div>
+        <div style="margin-top:16px; display:flex; gap:10px;">
+          <button class="btn btn-primary" onclick="triggerSend()">Send Emails</button>
+          <button class="btn btn-secondary" id="retryBtn" style="display:none;" onclick="triggerRetry()">Retry Failed</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Log</h2>
+        <div id="logPanel">Ready.</div>
+      </div>
+    </section>
+
+    <!-- PREVIEW TAB -->
+    <section id="tab-preview" class="tab-panel">
+      <div class="card">
+        <h2>Policy Count Preview</h2>
+        <div class="row">
+          <div>
+            <label for="previewFileSelect">Excel file</label>
+            <select id="previewFileSelect"></select>
+          </div>
+        </div>
+        <button class="btn btn-secondary" onclick="loadPreview()">Load Preview</button>
+        <div id="previewChart" style="margin-top:18px;"></div>
+      </div>
+    </section>
+
+    <!-- AGENTS TAB -->
+    <section id="tab-agents" class="tab-panel">
+      <div class="card">
+        <h2>Agent Directory</h2>
+        <div class="toolbar">
+          <button class="btn btn-primary" onclick="showAddAgentModal()">Add Agent</button>
+        </div>
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th></th></tr></thead>
+          <tbody id="agentTableBody"></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>Bulk Import (CSV)</h2>
+        <p style="font-size:12px;color:var(--text-muted);">One agent per line, format: <code>Name,Email</code></p>
+        <textarea id="csvInput" rows="6" placeholder="JOHN MOYO,john.moyo@nyaradzo.co.za"></textarea>
+        <div style="margin-top:10px;">
+          <button class="btn btn-secondary" onclick="importCsv()">Import</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATUS TAB -->
+    <section id="tab-status" class="tab-panel">
+      <div class="card">
+        <h2>Current Cycle: <span id="statusCycleLabel">—</span></h2>
+        <input type="text" id="statusSearch" placeholder="Search agent..." oninput="renderStatus()">
+        <div class="status-columns" style="margin-top:16px;">
+          <div>
+            <h3 style="font-size:13px;color:var(--success);">Sent</h3>
+            <div id="statusSent"></div>
+          </div>
+          <div>
+            <h3 style="font-size:13px;color:var(--warn);">Pending</h3>
+            <div id="statusPending"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HISTORY TAB -->
+    <section id="tab-history" class="tab-panel">
+      <div class="card">
+        <h2>Send History</h2>
+        <table>
+          <thead>
+            <tr><th>Cycle</th><th>Agents</th><th>Policies</th><th>Sent</th><th>Failed</th></tr>
+          </thead>
+          <tbody id="historyTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ADD/EDIT AGENT MODAL -->
+  <div class="modal-overlay" id="agentModalOverlay">
+    <div class="modal">
+      <h3 id="agentModalTitle">Add Agent</h3>
+      <label for="agentNameInput">Name</label>
+      <input type="text" id="agentNameInput">
+      <label for="agentEmailInput" style="margin-top:10px;">Email</label>
+      <input type="email" id="agentEmailInput">
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeAgentModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="confirmAddAgent()">Save</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  var STATE = {
+    agents: [],
+    files: [],
+    status: { sent: [], pending: [], cycleLabel: '' },
+    history: [],
+    editingIndex: -1,
+    overrideChecked: false,
+    lastFileId: null,
+    lastCycleLabel: null
+  };
+
+  // -------------------------------------------------------------------------
+  // Init
+  // -------------------------------------------------------------------------
+
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.tab-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () { switchTab(btn.dataset.tab); });
+    });
+    document.getElementById('cycleLabelDisplay').value = buildCycleLabel(new Date());
+    loadAll();
+  });
+
+  function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    document.querySelectorAll('.tab-panel').forEach(function (p) {
+      p.classList.toggle('active', p.id === 'tab-' + tab);
+    });
+  }
+
+  function toggleDark() {
+    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
+  }
+
+  function loadAll() {
+    log('Loading agents, files, status, history...');
+    google.script.run.withSuccessHandler(function (agents) {
+      STATE.agents = agents;
+      renderAgentTable();
+      renderAgentSendList(agents);
+    }).withFailureHandler(showError).getAgents();
+
+    google.script.run.withSuccessHandler(function (files) {
+      STATE.files = files;
+      populateFileSelects(files);
+    }).withFailureHandler(showError).getFilesInFolder();
+
+    google.script.run.withSuccessHandler(function (status) {
+      STATE.status = status;
+      document.getElementById('statusCycleLabel').textContent = status.cycleLabel;
+      renderStatus();
+      renderAgentSendList(STATE.agents);
+    }).withFailureHandler(showError).getStatusSummary();
+
+    google.script.run.withSuccessHandler(function (history) {
+      STATE.history = history;
+      renderHistory();
+    }).withFailureHandler(showError).getSendHistory();
+  }
+
+  function populateFileSelects(files) {
+    ['fileSelect', 'previewFileSelect'].forEach(function (id) {
+      var sel = document.getElementById(id);
+      sel.innerHTML = '';
+      if (files.length === 0) {
+        sel.innerHTML = '<option value="">No Excel files found</option>';
+        return;
+      }
+      files.forEach(function (f) {
+        var opt = document.createElement('option');
+        opt.value = f.id;
+        opt.textContent = f.name;
+        sel.appendChild(opt);
+      });
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Send tab
+  // -------------------------------------------------------------------------
+
+  function renderAgentSendList(agents) {
+    var container = document.getElementById('agentSendList');
+    container.innerHTML = '';
+    if (!agents.length) {
+      container.innerHTML = '<div class="empty">No agents configured yet — add some in the Agents tab.</div>';
+      return;
+    }
+    var sentNames = (STATE.status.sent || []).map(function (s) { return s.agentName.toUpperCase(); });
+
+    agents.forEach(function (a) {
+      var alreadySent = sentNames.indexOf(a.name.toUpperCase()) !== -1;
+      var row = document.createElement('div');
+      row.className = 'agent-row' + (alreadySent && !STATE.overrideChecked ? ' disabled' : '');
+      row.innerHTML =
+        '<input type="checkbox" class="agent-checkbox" value="' + escapeAttr(a.name) + '"' +
+        (alreadySent && !STATE.overrideChecked ? ' disabled' : '') + '>' +
+        '<span class="name">' + escapeHtml(a.name) + '</span>' +
+        (alreadySent ? '<span class="tag sent">sent</span>' : '<span class="tag">pending</span>');
+      container.appendChild(row);
+    });
+  }
+
+  function toggleOverride(checked) {
+    STATE.overrideChecked = checked;
+    renderAgentSendList(STATE.agents);
+  }
+
+  function selectAllAgents(checked) {
+    document.querySelectorAll('.agent-checkbox').forEach(function (cb) {
+      if (!cb.disabled) cb.checked = checked;
+    });
+  }
+
+  function getSelectedAgents() {
+    return Array.prototype.slice.call(document.querySelectorAll('.agent-checkbox:checked')).map(function (cb) {
+      return cb.value;
+    });
+  }
+
+  function triggerSend() {
+    var fileId = document.getElementById('fileSelect').value;
+    var selected = getSelectedAgents();
+    if (!fileId) { log('No file selected.'); return; }
+    if (selected.length === 0) { log('No agents selected.'); return; }
+
+    var cycleLabel = document.getElementById('cycleLabelDisplay').value;
+    STATE.lastFileId = fileId;
+    STATE.lastCycleLabel = cycleLabel;
+
+    log('Sending to ' + selected.length + ' agent(s)...');
+    google.script.run
+      .withSuccessHandler(handleSendResults)
+      .withFailureHandler(showError)
+      .sendEmails(selected, fileId, cycleLabel);
+  }
+
+  function triggerRetry() {
+    if (!STATE.lastFileId) { log('Nothing to retry yet.'); return; }
+    log('Retrying failed agents...');
+    google.script.run
+      .withSuccessHandler(handleSendResults)
+      .withFailureHandler(showError)
+      .retryFailedAgents(STATE.lastFileId, STATE.lastCycleLabel);
+  }
+
+  function handleSendResults(results) {
+    var failed = 0;
+    results.forEach(function (r) {
+      var icon = r.status === 'SENT' ? '✅' : r.status === 'SKIPPED' ? '➖' : '❌';
+      log(icon + ' ' + r.agentName + ' — ' + r.status + (r.message ? ' (' + r.message + ')' : ''));
+      if (r.status === 'FAILED') failed++;
+    });
+    document.getElementById('retryBtn').style.display = failed > 0 ? 'inline-block' : 'none';
+    log('Done. ' + results.length + ' processed, ' + failed + ' failed.');
+    loadAll();
+  }
+
+  // -------------------------------------------------------------------------
+  // Preview tab
+  // -------------------------------------------------------------------------
+
+  function loadPreview() {
+    var fileId = document.getElementById('previewFileSelect').value;
+    var chart = document.getElementById('previewChart');
+    if (!fileId) { chart.innerHTML = '<div class="empty">No file selected.</div>'; return; }
+    chart.innerHTML = '<div class="empty">Loading...</div>';
+    google.script.run.withSuccessHandler(function (counts) {
+      renderPreviewChart(counts);
+    }).withFailureHandler(showError).getAgentPolicyCounts(fileId);
+  }
+
+  function renderPreviewChart(counts) {
+    var chart = document.getElementById('previewChart');
+    chart.innerHTML = '';
+    if (!counts.length) {
+      chart.innerHTML = '<div class="empty">No policies found in this file.</div>';
+      return;
+    }
+    var max = counts[0].count || 1;
+    counts.forEach(function (c) {
+      var pct = Math.max(2, Math.round((c.count / max) * 100));
+      var row = document.createElement('div');
+      row.className = 'bar-row';
+      row.innerHTML =
+        '<div class="label" title="' + escapeAttr(c.agentName) + '">' + escapeHtml(c.agentName) + '</div>' +
+        '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div>' +
+        '<div class="bar-count">' + c.count + '</div>';
+      chart.appendChild(row);
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Agents tab
+  // -------------------------------------------------------------------------
+
+  function renderAgentTable() {
+    var body = document.getElementById('agentTableBody');
+    body.innerHTML = '';
+    if (!STATE.agents.length) {
+      body.innerHTML = '<tr><td colspan="3" class="empty">No agents yet.</td></tr>';
+      return;
+    }
+    STATE.agents.forEach(function (a, i) {
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + escapeHtml(a.name) + '</td>' +
+        '<td>' + escapeHtml(a.email || '—') + '</td>' +
+        '<td style="white-space:nowrap;">' +
+        '<button class="btn btn-outline" onclick="editAgent(' + i + ')">Edit</button> ' +
+        '<button class="btn btn-danger" onclick="deleteAgent(' + i + ')">Delete</button>' +
+        '</td>';
+      body.appendChild(tr);
+    });
+  }
+
+  function showAddAgentModal() {
+    STATE.editingIndex = -1;
+    document.getElementById('agentModalTitle').textContent = 'Add Agent';
+    document.getElementById('agentNameInput').value = '';
+    document.getElementById('agentEmailInput').value = '';
+    document.getElementById('agentModalOverlay').classList.add('active');
+  }
+
+  function editAgent(index) {
+    STATE.editingIndex = index;
+    var a = STATE.agents[index];
+    document.getElementById('agentModalTitle').textContent = 'Edit Agent';
+    document.getElementById('agentNameInput').value = a.name;
+    document.getElementById('agentEmailInput').value = a.email;
+    document.getElementById('agentModalOverlay').classList.add('active');
+  }
+
+  function closeAgentModal() {
+    document.getElementById('agentModalOverlay').classList.remove('active');
+  }
+
+  function confirmAddAgent() {
+    var name = document.getElementById('agentNameInput').value.trim();
+    var email = document.getElementById('agentEmailInput').value.trim();
+    if (!name) { alert('Agent name is required.'); return; }
+
+    if (STATE.editingIndex >= 0) {
+      STATE.agents[STATE.editingIndex] = { name: name, email: email };
+    } else {
+      STATE.agents.push({ name: name, email: email });
+    }
+    persistAgents();
+    closeAgentModal();
+  }
+
+  function deleteAgent(index) {
+    if (!confirm('Remove ' + STATE.agents[index].name + '?')) return;
+    STATE.agents.splice(index, 1);
+    persistAgents();
+  }
+
+  function importCsv() {
+    var raw = document.getElementById('csvInput').value.trim();
+    if (!raw) return;
+    var lines = raw.split('\n');
+    var added = 0;
+    lines.forEach(function (line) {
+      var parts = line.split(',');
+      var name = (parts[0] || '').trim();
+      var email = (parts[1] || '').trim();
+      if (!name) return;
+      var existing = STATE.agents.find(function (a) { return a.name.toUpperCase() === name.toUpperCase(); });
+      if (existing) {
+        existing.email = email || existing.email;
+      } else {
+        STATE.agents.push({ name: name, email: email });
+      }
+      added++;
+    });
+    document.getElementById('csvInput').value = '';
+    persistAgents();
+    log('Imported/updated ' + added + ' agent(s).');
+  }
+
+  function persistAgents() {
+    google.script.run.withSuccessHandler(function () {
+      renderAgentTable();
+      renderAgentSendList(STATE.agents);
+    }).withFailureHandler(showError).saveAgents(STATE.agents);
+  }
+
+  // -------------------------------------------------------------------------
+  // Status tab
+  // -------------------------------------------------------------------------
+
+  function renderStatus() {
+    var query = (document.getElementById('statusSearch').value || '').toUpperCase();
+    var sentEl = document.getElementById('statusSent');
+    var pendingEl = document.getElementById('statusPending');
+
+    var sent = (STATE.status.sent || []).filter(function (s) { return s.agentName.toUpperCase().indexOf(query) !== -1; });
+    var pending = (STATE.status.pending || []).filter(function (s) { return s.agentName.toUpperCase().indexOf(query) !== -1; });
+
+    sentEl.innerHTML = sent.length
+      ? sent.map(function (s) {
+          return '<div class="agent-row"><span class="name">' + escapeHtml(s.agentName) + '</span><span class="tag sent">' + s.policiesCount + ' policies</span></div>';
+        }).join('')
+      : '<div class="empty">None yet.</div>';
+
+    pendingEl.innerHTML = pending.length
+      ? pending.map(function (s) {
+          return '<div class="agent-row"><span class="name">' + escapeHtml(s.agentName) + '</span><span class="tag">pending</span></div>';
+        }).join('')
+      : '<div class="empty">All sent.</div>';
+  }
+
+  // -------------------------------------------------------------------------
+  // History tab
+  // -------------------------------------------------------------------------
+
+  function renderHistory() {
+    var body = document.getElementById('historyTableBody');
+    body.innerHTML = '';
+    if (!STATE.history.length) {
+      body.innerHTML = '<tr><td colspan="5" class="empty">No history yet.</td></tr>';
+      return;
+    }
+    STATE.history.forEach(function (c) {
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + escapeHtml(c.cycleLabel) + '</td>' +
+        '<td>' + c.agentCount + '</td>' +
+        '<td>' + c.policyCount + '</td>' +
+        '<td>' + c.sentCount + '</td>' +
+        '<td>' + c.failedCount + '</td>';
+      body.appendChild(tr);
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Utilities
+  // -------------------------------------------------------------------------
+
+  function buildCycleLabel(date) {
+    var monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var monthName = monthNames[date.getMonth()];
+    var startDay, endDay;
+    if (date.getDate() <= 14) {
+      startDay = 1; endDay = 14;
+    } else {
+      startDay = 15;
+      endDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    }
+    function pad(n) { return ('0' + n).slice(-2); }
+    return pad(startDay) + ' ' + monthName + ' – ' + pad(endDay) + ' ' + monthName + ' ' + date.getFullYear();
+  }
+
+  function log(msg) {
+    var panel = document.getElementById('logPanel');
+    var time = new Date().toLocaleTimeString();
+    panel.textContent += '\n[' + time + '] ' + msg;
+    panel.scrollTop = panel.scrollHeight;
+  }
+
+  function showError(err) {
+    log('ERROR: ' + (err && err.message ? err.message : err));
+  }
+
+  function escapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function escapeAttr(value) {
+    return escapeHtml(value);
+  }
+</script>
+
+</body>
+</html>
