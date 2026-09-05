@@ -41,3 +41,15 @@ Starting from the live deployment pulled from the "TANYA AUTOMATION" Apps Script
 3. **Cycle label/key could desync** — the cycle label shown in logs came from the browser's local clock while the cycle key was always computed server-side; a clock/timezone drift or a send right at a cycle boundary could log a label under the wrong key. Fixed: both are now always derived from the same server-side timestamp inside `sendEmails`.
 4. **No real "already sent" protection** — the Send tab's "Override — allow resend to already-sent agents" toggle didn't actually do anything: already-sent agents were never disabled in the checklist in the first place, override or not. Fixed both sides: the Send tab now disables agents already sent this cycle unless Override is on, and `sendEmails` itself now refuses to resend an already-sent agent unless the `override` flag is explicitly passed.
 5. **File picker could miss the uploaded file** — `getFilesInFolder()` only matched filenames ending in `.xlsx`/`.xls`/`.csv`; if Google Drive's "convert uploads" setting silently turns the upload into a native Google Sheet, it would disappear from the file list with no explanation. Fixed by also matching on the Google Sheets mimeType.
+
+## Design pass (this session)
+
+The portal's UI was already a mature, well-considered design (tinted shadows, dark mode, hover states, empty/loading states, a consistently applied brand palette) — not the generic "AI slop" pattern most redesign checklists target. Rather than force sweeping stylistic changes, an audit found and fixed a handful of genuine, low-risk gaps in `Index.html`:
+
+- Added `font-variant-numeric: tabular-nums` so the stats/counts don't jitter as values update.
+- Added a consistent branded `:focus-visible` ring — buttons, tabs, and checkboxes previously had no custom keyboard-focus indicator.
+- Added `:active` press feedback on buttons and tabs (previously only hover states existed).
+- Tinted the two remaining plain-black box-shadows (banner logo, modal) to match the navy-tinted shadow language used everywhere else.
+- Added semantic landmarks and ARIA: the header banner is now a `<header>`, the tab bar is a `<nav role="tablist">` with `role="tab"`/`aria-selected` per button, and each panel is `role="tabpanel"` with `aria-labelledby` — `switchTab()` now keeps `aria-selected` in sync.
+
+Deliberately left unchanged: the Inter font. Font-swapping is usually the highest-impact fix for marketing/landing pages, but for a dense internal data tool, Inter's legibility and tabular-figure support outweigh "personality" — swapping it here would be change for change's sake.
