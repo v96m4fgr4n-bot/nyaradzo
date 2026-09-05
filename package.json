@@ -1,0 +1,15 @@
+{
+  "name": "nfs-policy-mailer",
+  "private": true,
+  "description": "Google Apps Script project for the NFS Policy Mailer (Nyaradzo Financial Services). Managed with clasp.",
+  "scripts": {
+    "login": "clasp login",
+    "push": "clasp push",
+    "pull": "clasp pull",
+    "open": "clasp open-script",
+    "deploy": "clasp deploy"
+  },
+  "devDependencies": {
+    "@google/clasp": "^3.4.1"
+  }
+}

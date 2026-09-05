@@ -26,6 +26,24 @@ No `UrlFetchApp` and no `Drive.Files.export()` are used anywhere — both have c
 
 Panashe edits code here; Tanya (`tanashe14@gmail.com`, project owner) must redeploy after any change: **Deploy → Manage Deployments → New Version**.
 
+### Syncing with the live Apps Script project via clasp
+
+This repo is wired up for [`clasp`](https://github.com/google/clasp) (Google's Apps Script CLI), pointed at the live **TANYA AUTOMATION** script project (`.clasp.json`). `.claspignore` restricts what gets pushed to exactly `Code.gs`, `Index.html`, and `appsscript.json` — nothing else in the repo (README, package.json, etc.) touches the live project.
+
+```
+npm install        # installs clasp locally (already run once in this repo)
+npx clasp login     # one-time: opens a Google OAuth flow — must be run by
+                     # someone with edit access to the script (its owner,
+                     # tanashe14@gmail.com, or another editor added to it)
+npx clasp push      # uploads Code.gs / Index.html / appsscript.json to the
+                     # live Apps Script project's editor
+npx clasp pull      # pulls the live project's files back down into this repo
+npx clasp deploy    # creates a new deployment version — this is what
+                     # actually makes changes live on the web app URL
+```
+
+Important: `clasp push` updates the code sitting in the Apps Script *editor*, but the deployed web app keeps serving whichever version was last deployed until someone runs `clasp deploy` (or uses Deploy → Manage Deployments → New Version in the web UI). `clasp login` requires an interactive Google OAuth consent — it cannot be completed non-interactively, so a human has to do it once per machine/account.
+
 ## Known limitations
 
 - Agent name matching (Excel Column I ↔ agent roster) is an exact, case/whitespace-insensitive string match — no fuzzy matching. A misspelled or new agent name in the source file is caught and flagged (see Fixes below) but not auto-corrected.
