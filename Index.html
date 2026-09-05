@@ -711,15 +711,23 @@ function renderFileList(files) {
 function renderAgentSendList(agents) {
   var c = document.getElementById('agentSendList');
   if (!agents.length) { c.innerHTML='<div class="empty"><div class="empty-icon">👥</div>No agents</div>'; return; }
+  var sentInfo = {};
+  (statusData.sent || []).forEach(function(s){ sentInfo[s.name] = s; });
   var withEmail = agents.filter(function(a){ return a.email; });
   var noEmail = agents.filter(function(a){ return !a.email; });
   c.innerHTML = withEmail.concat(noEmail).map(function(a){
+    var sent = sentInfo[a.name];
+    var lockedBySent = sent && !window.overrideUnlocked;
+    var disabled = !a.email || lockedBySent;
+    var subLabel = !a.email ? '⚠ No email' :
+      sent ? '✓ Sent'+(sent.count?' · '+sent.count+' policies':'')+(sent.sentAt?' · '+sent.sentAt:'') :
+      escHtml(a.email);
+    var subColor = !a.email ? 'var(--danger)' : sent ? 'var(--success)' : 'var(--success)';
     return '<div class="agent-row send-agent-row" data-name="'+escHtml(a.name)+'">' +
       '<input type="checkbox" class="agent-check send-check" value="'+escHtml(a.name)+'"' +
-      (!a.email ? ' disabled title="No email set"' : '')+' onchange="updateSendSummary()">' +
+      (disabled ? ' disabled title="'+(lockedBySent?'Already sent this cycle — enable Override to resend':'No email set')+'"' : '')+' onchange="updateSendSummary()">' +
       '<div class="agent-name" style="'+(a.email?'':'color:var(--muted)')+'">'+escHtml(a.name)+'</div>' +
-      '<div style="font-size:11px;font-weight:500;color:'+(a.email?'var(--success)':'var(--danger)')+'">'+
-      (a.email ? escHtml(a.email) : '⚠ No email')+'</div></div>';
+      '<div style="font-size:11px;font-weight:500;color:'+subColor+'">'+subLabel+'</div></div>';
   }).join('');
   updateSendSummary();
 }
@@ -771,13 +779,20 @@ function loadPreview() {
       if (data.error) { document.getElementById('previewContent').innerHTML='<div class="empty"><div class="empty-icon">⚠️</div>'+data.error+'</div>'; return; }
       var maxCount = Math.max.apply(null, data.agents.map(function(a){ return a.count; }));
       document.getElementById('previewBadge').textContent = data.agents.length;
+      var unmatched = data.agents.filter(function(a){ return !a.known; });
+      var unmatchedTotal = unmatched.reduce(function(s,a){ return s+a.count; }, 0);
       var html = '<div style="padding:10px 18px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);">'+
         '<strong style="color:var(--navy)">'+data.total+'</strong> total policies across <strong style="color:var(--navy)">'+data.agents.length+'</strong> agents</div>';
+      if (unmatched.length) {
+        html += '<div style="padding:10px 18px;font-size:11px;color:var(--danger);border-bottom:1px solid var(--border);background:var(--danger-dim,rgba(220,50,50,0.08));">'+
+          '⚠ '+unmatchedTotal+' polic'+(unmatchedTotal===1?'y':'ies')+' across '+unmatched.length+' name(s) not in the agent list — they will NOT be sent to anyone. '+
+          'Add the agent or fix the spelling before sending.</div>';
+      }
       html += data.agents.map(function(a){
         var pct = Math.round((a.count/maxCount)*100);
-        return '<div class="preview-row">' +
-          '<div class="agent-name" style="min-width:200px">'+escHtml(a.name)+'</div>' +
-          '<div class="preview-bar-wrap"><div class="preview-bar" style="width:'+pct+'%"></div></div>' +
+        return '<div class="preview-row"'+(!a.known?' title="Not in agent list — will not be sent"':'')+'>' +
+          '<div class="agent-name" style="min-width:200px;'+(a.known?'':'color:var(--danger)')+'">'+(a.known?'':'⚠ ')+escHtml(a.name)+'</div>' +
+          '<div class="preview-bar-wrap"><div class="preview-bar" style="width:'+pct+'%;'+(a.known?'':'background:var(--danger)')+'"></div></div>' +
           '<div class="preview-count">'+a.count+'</div></div>';
       }).join('');
       document.getElementById('previewContent').innerHTML = html;
@@ -826,19 +841,21 @@ function startSend(selectedAgents, fileId) {
       document.getElementById('sendBtn').disabled=false;
       document.getElementById('sendBtn').innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send PDFs';
     })
-    .sendEmails(selectedAgents, fileId, cycleLabel);
+    .sendEmails(selectedAgents, fileId, cycleLabel, !!window.overrideUnlocked);
 }
 
 function handleSendResults(results) {
   var failedCount = 0;
   results.forEach(function(r) {
-    if (r.skipped) addLog('warn','⚠ Skipped '+r.name+' — no policies found');
+    if (r.unmatched) addLog('warn','⚠ '+r.count+' polic'+(r.count===1?'y':'ies')+' not sent — unmatched agent name(s): '+r.error);
+    else if (r.alreadySent) addLog('warn','⚠ Skipped '+r.name+' — already sent this cycle (enable Override to resend)');
+    else if (r.skipped) addLog('warn','⚠ Skipped '+r.name+' — no policies found');
     else if (r.success) addLog('success','✓ Sent to '+r.name+' — '+r.count+' policies');
     else { addLog('error','✗ Failed: '+r.name+' — '+r.error); failedCount++; }
   });
-  var sent = results.filter(function(r){ return r.success&&!r.skipped; }).length;
+  var sent = results.filter(function(r){ return r.success&&!r.skipped&&!r.unmatched; }).length;
   var skipped = results.filter(function(r){ return r.skipped; }).length;
-  var total = results.reduce(function(s,r){ return s+(r.count||0); },0);
+  var total = results.reduce(function(s,r){ return s+(r.unmatched?0:(r.count||0)); },0);
   addLog('info','Done · '+sent+' sent · '+total+' policies · '+skipped+' skipped'+(failedCount>0?' · '+failedCount+' FAILED':''));
   document.getElementById('sendBtn').disabled = false;
   document.getElementById('sendBtn').innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send PDFs';
@@ -868,6 +885,7 @@ function loadStatus() {
       document.getElementById('statPending').textContent = data.pending.length;
       document.getElementById('statusCycleLabel').textContent = data.cycle+' · Status';
       renderStatus(currentStatusFilter);
+      renderAgentSendList(allAgents); // reflect who's already sent this cycle on the Send tab
     })
     .withFailureHandler(showError)
     .getStatusSummary();

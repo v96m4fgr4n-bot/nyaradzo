@@ -89,9 +89,15 @@ function getFilesInFolder() {
   var result = [];
   while (files.hasNext()) {
     var f = files.next();
-    if (f.getName().match(/\.(xlsx|xls|csv)$/i)) {
+    var name = f.getName();
+    if (name.indexOf("__TEMP_") === 0) continue; // stray leftover from an interrupted import
+    // Drive can silently convert an uploaded .xlsx into a native Google Sheet
+    // (depending on the "Convert uploads" setting), which drops the extension —
+    // match on mimeType too so the file doesn't just disappear from the list.
+    var isSpreadsheetLike = /\.(xlsx|xls|csv)$/i.test(name) || f.getMimeType() === MimeType.GOOGLE_SHEETS;
+    if (isSpreadsheetLike) {
       result.push({
-        id: f.getId(), name: f.getName(),
+        id: f.getId(), name: name,
         size: Math.round(f.getSize() / 1024) + " KB",
         modified: Utilities.formatDate(f.getLastUpdated(), Session.getScriptTimeZone(), "dd MMM yyyy HH:mm")
       });
@@ -153,23 +159,33 @@ function getStatusSummary() {
 
 // ── Send history (all past cycles) ───────────────────────────
 function getSendHistory() {
-  var logs = getSendLog();
+  var logs = getSendLog(); // newest first
   var cycleMap = {};
 
+  // Keep only the most recent log row per agent per cycle before aggregating,
+  // so a resend (via the Override toggle) or a retry doesn't get counted twice.
   logs.forEach(function(l) {
     var key = l.cycleKey || 'unknown';
     if (!cycleMap[key]) {
-      cycleMap[key] = { cycleKey: key, cycleLabel: l.cycleLabel || key, agents: 0, policies: 0, failed: 0, timestamp: l.timestamp };
+      cycleMap[key] = { cycleKey: key, cycleLabel: l.cycleLabel || key, timestamp: l.timestamp, agentLogs: {} };
     }
-    if (l.status === 'Sent') {
-      cycleMap[key].agents++;
-      cycleMap[key].policies += (parseInt(l.count) || 0);
-    } else if (l.status && l.status.indexOf('Failed') === 0) {
-      cycleMap[key].failed++;
+    if (!cycleMap[key].agentLogs[l.agentName]) {
+      cycleMap[key].agentLogs[l.agentName] = l;
     }
   });
 
-  return Object.values(cycleMap).sort(function(a, b) { return b.cycleKey.localeCompare(a.cycleKey); });
+  return Object.values(cycleMap).map(function(c) {
+    var agents = 0, policies = 0, failed = 0;
+    Object.values(c.agentLogs).forEach(function(l) {
+      if (l.status === 'Sent') {
+        agents++;
+        policies += (parseInt(l.count) || 0);
+      } else if (l.status && l.status.indexOf('Failed') === 0) {
+        failed++;
+      }
+    });
+    return { cycleKey: c.cycleKey, cycleLabel: c.cycleLabel, agents: agents, policies: policies, failed: failed, timestamp: c.timestamp };
+  }).sort(function(a, b) { return b.cycleKey.localeCompare(a.cycleKey); });
 }
 
 // ── Policy preview per agent (before sending) ────────────────
@@ -190,8 +206,12 @@ function getAgentPolicyCounts(fileId) {
       var agent = (row[AGENT_COL] || "").toString().trim();
       if (agent) counts[agent] = (counts[agent] || 0) + 1;
     });
+    // Flag names in the file that don't match anyone in the agent roster
+    // (typos, new agents not yet added) so it's visible before sending, not after.
+    var knownNames = {};
+    getAgents().forEach(function(a) { knownNames[a.name.trim().toLowerCase()] = true; });
     var result = Object.keys(counts).map(function(name) {
-      return { name: name, count: counts[name] };
+      return { name: name, count: counts[name], known: !!knownNames[name.trim().toLowerCase()] };
     }).sort(function(a,b) { return b.count - a.count; });
     return { total: dataRows.length, agents: result };
   } catch(e) {
@@ -254,13 +274,29 @@ function buildPdfBlob(agentName, cycleLabel, headers, rows) {
 }
 
 // ── Send emails ──────────────────────────────────────────────
-function sendEmails(selectedAgents, fileId, cycleLabel) {
+// `override`: when true, agents already marked "Sent" for the current cycle
+// may be resent to; when false/omitted they're skipped server-side even if
+// they somehow reach this function (the Send tab is also expected to keep
+// them unselectable unless Override is switched on).
+function sendEmails(selectedAgents, fileId, cycleLabel, override) {
   var results = [];
   var ss = getSettingsSpreadsheet();
   var logSheet = ss.getSheetByName(LOG_SHEET);
   var now = new Date();
-  var label = cycleLabel || getBiWeeklyCycleLabel();
-  var cycleKey = getBiWeeklyCycleKey();
+  // Always derive both the label and the key from the same server-side instant.
+  // (Previously the label came from the caller — computed from the browser's
+  // local clock — while the key was always computed here; a clock/timezone
+  // drift or a send right at a cycle boundary could log a label under the
+  // wrong key.)
+  var label = getBiWeeklyCycleLabel(now);
+  var cycleKey = getBiWeeklyCycleKey(now);
+
+  var alreadySent = {};
+  if (!override) {
+    getSendLog().forEach(function(l) {
+      if (l.cycleKey === cycleKey && l.status === "Sent") alreadySent[l.agentName] = true;
+    });
+  }
 
   // Import Excel to Google Sheet
   var sourceFileId = null;
@@ -281,8 +317,24 @@ function sendEmails(selectedAgents, fileId, cycleLabel) {
 
   var AGENT_COL = 8;
 
+  // Policies whose agent name in the file doesn't match anyone in the full
+  // roster (typo, new agent not yet added) would otherwise never be sent to
+  // anyone and never show up anywhere — flag them instead of losing them.
+  var knownNames = {};
+  getAgents().forEach(function(a) { knownNames[a.name.trim().toLowerCase()] = true; });
+  var unmatchedCounts = {};
+  dataRows.forEach(function(row) {
+    var raw = (row[AGENT_COL] || "").toString().trim();
+    if (!raw || knownNames[raw.toLowerCase()]) return;
+    unmatchedCounts[raw] = (unmatchedCounts[raw] || 0) + 1;
+  });
+
   selectedAgents.forEach(function(agent) {
     try {
+      if (alreadySent[agent.name]) {
+        results.push({ name:agent.name, success:true, skipped:true, alreadySent:true, count:0 });
+        return;
+      }
       var agentRows = dataRows.filter(function(row) {
         return (row[AGENT_COL]||"").toString().trim().toLowerCase() === agent.name.trim().toLowerCase();
       });
@@ -313,14 +365,23 @@ function sendEmails(selectedAgents, fileId, cycleLabel) {
 
   if (sourceFileId) { try { DriveApp.getFileById(sourceFileId).setTrashed(true); } catch(ignore){} }
 
+  var unmatchedAgents = Object.keys(unmatchedCounts).map(function(name) { return { name:name, count:unmatchedCounts[name] }; });
+  var unmatchedDetail = "";
+  if (unmatchedAgents.length) {
+    var unmatchedTotal = unmatchedAgents.reduce(function(s,a){ return s + a.count; }, 0);
+    unmatchedDetail = unmatchedAgents.map(function(a){ return a.name + " (" + a.count + ")"; }).join("; ");
+    logSheet.appendRow([now, "UNMATCHED", "", unmatchedTotal, "Unmatched - not in agent list: " + unmatchedDetail, label, cycleKey]);
+    results.push({ name: "Unmatched agent names", success:false, unmatched:true, count:unmatchedTotal, error:unmatchedDetail });
+  }
+
   // Send summary email to Tanya
   try {
     var summaryTo = SUMMARY_EMAIL || Session.getEffectiveUser().getEmail();
-    var sentCount = results.filter(function(r){ return r.success && !r.skipped; }).length;
+    var sentCount = results.filter(function(r){ return r.success && !r.skipped && !r.unmatched; }).length;
     var skippedCount = results.filter(function(r){ return r.skipped; }).length;
-    var failedCount = results.filter(function(r){ return !r.success; }).length;
-    var totalPolicies = results.reduce(function(s,r){ return s + (r.count||0); }, 0);
-    var failedNames = results.filter(function(r){ return !r.success; }).map(function(r){ return r.name; }).join(", ");
+    var failedCount = results.filter(function(r){ return !r.success && !r.unmatched; }).length;
+    var totalPolicies = results.reduce(function(s,r){ return s + (r.unmatched ? 0 : (r.count||0)); }, 0);
+    var failedNames = results.filter(function(r){ return !r.success && !r.unmatched; }).map(function(r){ return r.name; }).join(", ");
 
     var summarySubject = "NFS Mailer Summary - " + label;
     var summaryBody = "Hi Tanya,\n\nHere is your send summary for cycle: " + label + "\n\n" +
@@ -329,6 +390,7 @@ function sendEmails(selectedAgents, fileId, cycleLabel) {
       "  Agents Skipped:     " + skippedCount + "\n" +
       "  Failed Sends:       " + failedCount + "\n" +
       (failedCount > 0 ? "  Failed Agents:      " + failedNames + "\n" : "") +
+      (unmatchedAgents.length > 0 ? "  Unmatched Names:    " + unmatchedDetail + "\n" : "") +
       "\nRegards,\nNFS Policy Mailer System";
     GmailApp.sendEmail(summaryTo, summarySubject, summaryBody, { name: "NFS Policy Mailer" });
   } catch(ignore) {}
