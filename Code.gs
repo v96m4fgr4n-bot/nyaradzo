@@ -218,6 +218,17 @@ function getAgentPolicyCounts(fileId) {
     // Diagnostic: expose the actual column layout (letter, header text, a
     // sample value) so a shifted/changed export format is visible in the UI
     // instead of silently producing a wrong or empty agent breakdown.
+    // Values are converted to plain strings before crossing the
+    // google.script.run boundary — a raw Date or formula-error cell here can
+    // silently break serialization and deliver `null` to the client instead
+    // of a real error.
+    function safeCell_(v) {
+      if (v === null || v === undefined || v === "") return "";
+      if (Object.prototype.toString.call(v) === "[object Date]") {
+        try { return Utilities.formatDate(v, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm"); } catch (e) { return "[date]"; }
+      }
+      try { return String(v); } catch (e) { return "[unreadable]"; }
+    }
     var sampleRow = dataRows.length ? dataRows[0] : [];
     function colLetter_(n) {
       n = n + 1; var s = "";
@@ -225,7 +236,7 @@ function getAgentPolicyCounts(fileId) {
       return s;
     }
     var columns = headers.map(function(h, i) {
-      return { letter: colLetter_(i), header: h, sample: sampleRow[i], isAgentCol: i === AGENT_COL };
+      return { letter: colLetter_(i), header: safeCell_(h), sample: safeCell_(sampleRow[i]), isAgentCol: i === AGENT_COL };
     });
 
     return { total: dataRows.length, agents: result, columns: columns };
