@@ -125,3 +125,12 @@ Added a 👁 button on each Preview-tab row that generates the exact PDF and Exc
 - New backend function `previewAgentAttachments(fileId, agentName)`: re-reads the file, filters to that one agent (same logic as `sendEmails()`), builds the real PDF and Excel via the existing `buildPdfBlob()`/`buildXlsxBlob()`, and returns them as base64 strings.
 - The client decodes the base64 into real `Blob` objects in the browser (`base64ToBlob()`) — the PDF opens in a new tab via `URL.createObjectURL()`, the Excel downloads directly. No temporary files are created in Drive, and no email is sent.
 - Verified via the dry-run harness that `previewAgentAttachments()` produces byte-correct, independently-openable output (same `openpyxl` validation as the Excel attachment feature) and confirmed zero emails are sent when it runs.
+
+## Grouped Lapsed/Inactive sections in PDF & Excel (this session)
+
+Previously an agent's policy list mixed Lapsed and Inactive rows in whatever order they appeared in the source file. Both attachments now group rows into labeled blocks — Lapsed first, then Inactive, then Other (anything not matching either) — via a new shared helper `groupRowsByStatus_(rows)` in `Code.gs`, used by both `buildPdfBlob()` and `buildXlsxBlob()` (and therefore by `sendEmails()` and the 👁 preview button alike).
+
+- **PDF** — each group gets a full-width colored banner row ("LAPSED (12)", "INACTIVE (5)") above its rows: red for Lapsed, amber for Inactive, gray for Other.
+- **Excel** — each group gets a bold, white-on-navy merged banner row spanning all columns, built by hand-adding a second font/fill/cellXf to the workbook's `styles.xml` and a `<mergeCells>` entry per banner row in `sheet1.xml`.
+- A status with zero matching rows for that agent produces no banner at all — no empty sections.
+- Verified with the dry-run harness + `openpyxl`: banner rows render bold and merged (`A2:I2`, etc.), row order is Lapsed block → Inactive block → Other block, and the PDF HTML contains all three group classes with correct per-group counts.

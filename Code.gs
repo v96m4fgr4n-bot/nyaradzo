@@ -210,6 +210,24 @@ function formatStatusBreakdown_(b) {
   return parts.length ? parts.join(", ") : "0";
 }
 
+// Splits an agent's rows into Lapsed / Inactive / Other blocks (in that
+// order, original row order preserved within each block) so the PDF and
+// Excel show each status as its own labeled section instead of interleaved.
+function groupRowsByStatus_(rows) {
+  var buckets = { lapsed: [], inactive: [], other: [] };
+  rows.forEach(function(row) {
+    var status = (row[STATUS_COL] || "").toString().trim().toLowerCase();
+    if (status.indexOf("lapsed") !== -1) buckets.lapsed.push(row);
+    else if (status.indexOf("inactive") !== -1) buckets.inactive.push(row);
+    else buckets.other.push(row);
+  });
+  return [
+    { key: "lapsed", label: "LAPSED", rows: buckets.lapsed },
+    { key: "inactive", label: "INACTIVE", rows: buckets.inactive },
+    { key: "other", label: "OTHER", rows: buckets.other }
+  ].filter(function(g) { return g.rows.length > 0; });
+}
+
 // ── Policy preview per agent (before sending) ────────────────
 function getAgentPolicyCounts(fileId) {
   var sourceFileId = null;
@@ -290,9 +308,14 @@ function buildPdfBlob(agentName, cycleLabel, headers, rows) {
   }
   var statusBreakdown = formatStatusBreakdown_(countByStatus_(rows));
   var headerCells = headers.map(function(h) { return "<th>" + esc(h) + "</th>"; }).join("");
-  var dataRows = rows.map(function(row) {
-    var cells = headers.map(function(_,i) { return "<td>" + esc(row[i]) + "</td>"; }).join("");
-    return "<tr>" + cells + "</tr>";
+  var dataRows = groupRowsByStatus_(rows).map(function(g) {
+    var sectionRow = '<tr class="group-row group-' + g.key + '"><td colspan="' + headers.length + '">' +
+      esc(g.label) + " (" + g.rows.length + ")</td></tr>";
+    var rowsHtml = g.rows.map(function(row) {
+      var cells = headers.map(function(_,i) { return "<td>" + esc(row[i]) + "</td>"; }).join("");
+      return "<tr>" + cells + "</tr>";
+    }).join("");
+    return sectionRow + rowsHtml;
   }).join("");
 
   var html = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><style>" +
@@ -313,6 +336,10 @@ function buildPdfBlob(agentName, cycleLabel, headers, rows) {
     "thead th { padding:6px 5px; text-align:left; font-weight:600; white-space:nowrap; }" +
     "tbody tr:nth-child(even) { background:#f0f3fa; }" +
     "tbody td { padding:4px 5px; border-bottom:1px solid #dde3f0; vertical-align:top; }" +
+    ".group-row td { padding:5px; font-weight:bold; font-size:8px; text-transform:uppercase; letter-spacing:0.6px; color:#fff; border-bottom:none; }" +
+    ".group-lapsed td { background:#b3261e; }" +
+    ".group-inactive td { background:#a66a00; }" +
+    ".group-other td { background:#555555; }" +
     ".footer { font-size:7.5px; color:#999; border-top:1px solid #dde3f0; padding-top:8px; display:flex; justify-content:space-between; }" +
     "</style></head><body>" +
     "<div class=\"header\"><img src=\"data:image/png;base64," + LOGO_B64 + "\" />" +
@@ -365,16 +392,45 @@ function buildXlsxBlob(agentName, cycleLabel, headers, rows) {
     }).join("");
     return '<row r="' + rowIndex + '">' + cells + '</row>';
   }
+  // Bold/white-on-navy section-header row (style index 1, see stylesXml)
+  // spanning every column, used to label each Lapsed/Inactive/Other block.
+  function sectionRowXml(rowIndex, text, colSpan) {
+    var cells = [];
+    for (var c = 0; c < colSpan; c++) {
+      var ref = colLetter(c) + rowIndex;
+      if (c === 0) {
+        cells.push('<c r="' + ref + '" t="inlineStr" s="1"><is><t xml:space="preserve">' + escXml(text) + '</t></is></c>');
+      } else {
+        cells.push('<c r="' + ref + '" s="1"/>');
+      }
+    }
+    return '<row r="' + rowIndex + '">' + cells.join("") + '</row>';
+  }
 
   var sheetRows = [rowXml(1, headers)];
-  rows.forEach(function(row, i) { sheetRows.push(rowXml(i + 2, row)); });
-  var dimensionRef = "A1:" + colLetter(headers.length - 1) + (rows.length + 1);
+  var mergeCells = [];
+  var rowIndex = 2;
+  groupRowsByStatus_(rows).forEach(function(g) {
+    sheetRows.push(sectionRowXml(rowIndex, g.label + " (" + g.rows.length + ")", headers.length));
+    mergeCells.push(colLetter(0) + rowIndex + ":" + colLetter(headers.length - 1) + rowIndex);
+    rowIndex++;
+    g.rows.forEach(function(row) {
+      sheetRows.push(rowXml(rowIndex, row));
+      rowIndex++;
+    });
+  });
+  var lastRow = rowIndex - 1;
+  var dimensionRef = "A1:" + colLetter(headers.length - 1) + lastRow;
+  var mergeCellsXml = mergeCells.length
+    ? '<mergeCells count="' + mergeCells.length + '">' + mergeCells.map(function(r) { return '<mergeCell ref="' + r + '"/>'; }).join("") + '</mergeCells>'
+    : "";
 
   var sheetXml =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
     '<dimension ref="' + dimensionRef + '"/>' +
     '<sheetData>' + sheetRows.join("") + '</sheetData>' +
+    mergeCellsXml +
     '</worksheet>';
 
   var contentTypesXml =
@@ -409,11 +465,21 @@ function buildXlsxBlob(agentName, cycleLabel, headers, rows) {
   var stylesXml =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-    '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>' +
-    '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>' +
+    '<fonts count="2">' +
+    '<font><sz val="11"/><name val="Calibri"/></font>' +
+    '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>' +
+    '</fonts>' +
+    '<fills count="3">' +
+    '<fill><patternFill patternType="none"/></fill>' +
+    '<fill><patternFill patternType="gray125"/></fill>' +
+    '<fill><patternFill patternType="solid"><fgColor rgb="FF1A3080"/><bgColor indexed="64"/></patternFill></fill>' +
+    '</fills>' +
     '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-    '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>' +
+    '<cellXfs count="2">' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+    '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>' +
+    '</cellXfs>' +
     '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
     '</styleSheet>';
 
