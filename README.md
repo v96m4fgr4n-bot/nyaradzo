@@ -1,6 +1,6 @@
 # NFS Policy Mailer
 
-Google Apps Script web app for Nyaradzo Financial Services (NFS). Twice a month, it takes an Excel export of lapsed funeral policies, splits it per sales agent, and emails each agent a branded PDF of just their own lapsed policies.
+Google Apps Script web app for Nyaradzo Financial Services (NFS). Twice a month, it takes an Excel export of lapsed funeral policies, splits it per sales agent, and emails each agent a branded PDF **and an editable Excel sheet** of just their own lapsed policies — the Excel copy lets agents track and mark off policies as they get reinstated.
 
 Built for Tanyaradzwa Manyeruke. Deployed under `tanashe14@gmail.com`.
 
@@ -81,3 +81,13 @@ Asked for a deeper revamp beyond the polish pass above. Ran the `ui-ux-pro-max` 
 - **Glassmorphism**, per the style database's "financial dashboards, high-end corporate" recommendation — applied only to the chrome (the header banner + stat cards now form one continuous navy gradient hero band, with the four stat tiles rendered as frosted/translucent glass; the modal overlay now blurs the content behind it), never to the dense data tables/lists, where full opacity and contrast matter more than visual flair.
 
 Verified with a Playwright render (light + dark, Send + Agents tabs, tab-switching) that everything still renders and functions correctly.
+
+## Excel attachment (this session)
+
+Each agent's email now includes an editable `.xlsx` alongside the PDF, so they can mark off policies once they're reinstated — `buildXlsxBlob()` in `Code.gs`.
+
+Since this project cannot use `UrlFetchApp`, `Drive.Files.export()`, or any external library (see Known Issues below), the `.xlsx` is hand-built: an OOXML spreadsheet package (the same zip-of-XML-files format every real `.xlsx` uses internally) assembled directly via `Utilities.zip()`, then relabeled with the correct filename and content type so it opens as a normal Excel file rather than a zip archive. All cells are written as inline strings (no `sharedStrings.xml`) to keep the format minimal.
+
+This was validated outside of Apps Script before shipping: the exact same function, run against synthetic data through a Node.js harness with Drive/Sheets/Gmail mocked out, produces a file that
+- round-trips correctly through `openpyxl` (a real, independent OOXML implementation) with zero warnings, and
+- is identified by the `file` utility's content-based magic detection as `Microsoft Excel 2007+`, not a zip archive — the same detection mechanism email clients and OS file browsers use.

@@ -273,6 +273,102 @@ function buildPdfBlob(agentName, cycleLabel, headers, rows) {
   return pdfBlob;
 }
 
+// ── Build XLSX (editable copy so agents can mark off reinstated policies) ────
+// Hand-built OOXML package (no UrlFetchApp, no Drive.Files.export, no
+// external library — all of which are off-limits in this deployment).
+// All cells are written as inline strings (no sharedStrings.xml) to keep the
+// format minimal and low-risk; verified to open correctly in Excel-compatible
+// readers (openpyxl round-trip, well-formed XML in every part).
+function buildXlsxBlob(agentName, cycleLabel, headers, rows) {
+  function escXml(val) {
+    if (val === null || val === undefined) return "";
+    return val.toString()
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+  }
+  function colLetter(n) {
+    n = n + 1;
+    var s = "";
+    while (n > 0) {
+      var rem = (n - 1) % 26;
+      s = String.fromCharCode(65 + rem) + s;
+      n = Math.floor((n - 1) / 26);
+    }
+    return s;
+  }
+  function rowXml(rowIndex, values) {
+    var cells = values.map(function(v, colIdx) {
+      var ref = colLetter(colIdx) + rowIndex;
+      return '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + escXml(v) + '</t></is></c>';
+    }).join("");
+    return '<row r="' + rowIndex + '">' + cells + '</row>';
+  }
+
+  var sheetRows = [rowXml(1, headers)];
+  rows.forEach(function(row, i) { sheetRows.push(rowXml(i + 2, row)); });
+  var dimensionRef = "A1:" + colLetter(headers.length - 1) + (rows.length + 1);
+
+  var sheetXml =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<dimension ref="' + dimensionRef + '"/>' +
+    '<sheetData>' + sheetRows.join("") + '</sheetData>' +
+    '</worksheet>';
+
+  var contentTypesXml =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/>' +
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+    '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+    '</Types>';
+
+  var rootRelsXml =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+    '</Relationships>';
+
+  var workbookXml =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+    '<sheets><sheet name="Lapsed Policies" sheetId="1" r:id="rId1"/></sheets>' +
+    '</workbook>';
+
+  var workbookRelsXml =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+    '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+    '</Relationships>';
+
+  var stylesXml =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>' +
+    '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>' +
+    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>' +
+    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+    '</styleSheet>';
+
+  var zipBlob = Utilities.zip([
+    Utilities.newBlob(contentTypesXml, "application/xml", "[Content_Types].xml"),
+    Utilities.newBlob(rootRelsXml, "application/xml", "_rels/.rels"),
+    Utilities.newBlob(workbookXml, "application/xml", "xl/workbook.xml"),
+    Utilities.newBlob(workbookRelsXml, "application/xml", "xl/_rels/workbook.xml.rels"),
+    Utilities.newBlob(sheetXml, "application/xml", "xl/worksheets/sheet1.xml"),
+    Utilities.newBlob(stylesXml, "application/xml", "xl/styles.xml"),
+  ], "sheet.xlsx");
+
+  zipBlob.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  zipBlob.setName("Lapsed_" + agentName.replace(/[^a-zA-Z0-9 _-]/g, "") + "_" + cycleLabel + ".xlsx");
+  return zipBlob;
+}
+
 // ── Send emails ──────────────────────────────────────────────
 // `override`: when true, agents already marked "Sent" for the current cycle
 // may be resent to; when false/omitted they're skipped server-side even if
@@ -344,16 +440,17 @@ function sendEmails(selectedAgents, fileId, cycleLabel, override) {
         return;
       }
       var pdfBlob = buildPdfBlob(agent.name, label, headers, agentRows);
+      var xlsxBlob = buildXlsxBlob(agent.name, label, headers, agentRows);
       var firstName = agent.name.split(" ")[0];
       var displayName = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
       var subject = "Lapsed Policy List - " + label;
       var body = "Hi " + displayName + ",\n\n" +
-        "Please find attached your lapsed policy list for this period (" + agentRows.length + " policies).\n\n" +
-        "Kindly prioritise following up with these clients at your earliest convenience to assist with reinstatement.\n\n" +
+        "Please find attached your lapsed policy list for this period (" + agentRows.length + " policies) as both a PDF and an editable Excel sheet.\n\n" +
+        "Kindly prioritise following up with these clients at your earliest convenience to assist with reinstatement. You can use the Excel sheet to track and mark off policies once they have been reinstated.\n\n" +
         "Should you have any queries, please do not hesitate to reach out.\n\n" +
         "Regards,\n" + SENDER_NAME + "\n" + COMPANY_NAME;
       GmailApp.sendEmail(agent.email, subject, body, {
-        attachments: [pdfBlob], name: SENDER_NAME + " | " + COMPANY_NAME, replyTo: "tanyaradzwa.manyeruke@nyaradzo.co.za"
+        attachments: [pdfBlob, xlsxBlob], name: SENDER_NAME + " | " + COMPANY_NAME, replyTo: "tanyaradzwa.manyeruke@nyaradzo.co.za"
       });
       logSheet.appendRow([now, agent.name, agent.email, agentRows.length, "Sent", label, cycleKey]);
       results.push({ name:agent.name, success:true, count:agentRows.length });
