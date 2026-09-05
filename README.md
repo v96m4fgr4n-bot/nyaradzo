@@ -91,3 +91,9 @@ Since this project cannot use `UrlFetchApp`, `Drive.Files.export()`, or any exte
 This was validated outside of Apps Script before shipping: the exact same function, run against synthetic data through a Node.js harness with Drive/Sheets/Gmail mocked out, produces a file that
 - round-trips correctly through `openpyxl` (a real, independent OOXML implementation) with zero warnings, and
 - is identified by the `file` utility's content-based magic detection as `Microsoft Excel 2007+`, not a zip archive — the same detection mechanism email clients and OS file browsers use.
+
+## Agent column fix (this session)
+
+Live testing against the real Easipol export found the Preview tab grouping everything under "Inactive" / "Lapsed" instead of per agent — those are policy *status* values, not agent names. The current export has **Status in Column I and Agent in Column J**, one column later than this project's original documentation assumed (`AGENT_COL` was `8`, i.e. Column I; corrected to `9`, i.e. Column J, in both `sendEmails()` and `getAgentPolicyCounts()`).
+
+This was diagnosed from a live screenshot, not independently re-verified against the actual file from this session (no access to the real Drive file) — confirm Preview now shows real agent names, not status values, after this deploys. If Easipol's export layout shifts again in the future, the more durable fix would be to look up the Agent column by matching the header row's text (e.g. a column literally titled "Agent") instead of a hardcoded index — flagged here as a follow-up, not yet implemented.
