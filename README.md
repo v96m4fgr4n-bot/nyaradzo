@@ -53,3 +53,13 @@ The portal's UI was already a mature, well-considered design (tinted shadows, da
 - Added semantic landmarks and ARIA: the header banner is now a `<header>`, the tab bar is a `<nav role="tablist">` with `role="tab"`/`aria-selected` per button, and each panel is `role="tabpanel"` with `aria-labelledby` — `switchTab()` now keeps `aria-selected` in sync.
 
 Deliberately left unchanged: the Inter font. Font-swapping is usually the highest-impact fix for marketing/landing pages, but for a dense internal data tool, Inter's legibility and tabular-figure support outweigh "personality" — swapping it here would be change for change's sake.
+
+## Visual revamp (this session, round 2)
+
+Asked for a deeper revamp beyond the polish pass above. Ran the `ui-ux-pro-max` skill's design-system search against "internal financial services admin dashboard" (density 8/10, variance 4/10, motion 4/10) and applied its top matches:
+
+- **Typography:** swapped to a **Fira Code + Fira Sans** pairing (the top database match for "dashboards, analytics, admin panels") — Fira Sans for labels/prose, Fira Code for anything numeric or structured (stat values, badges, pill counts, timestamps, the log panel, email/CSV fields). This also fixed a pre-existing bug where the email and CSV-import fields declared `font-family:'Inter',monospace` — Inter isn't a monospace font, so it never actually rendered as one.
+- **Color:** refined the light/dark neutral scale (background, border, muted-text tokens) against a validated navy+gold banking/finance color reference, keeping the exact brand hex (`#1a3080` / `#c8a000`) as the anchor — same CSS variable names throughout, so nothing downstream needed to change.
+- **Glassmorphism**, per the style database's "financial dashboards, high-end corporate" recommendation — applied only to the chrome (the header banner + stat cards now form one continuous navy gradient hero band, with the four stat tiles rendered as frosted/translucent glass; the modal overlay now blurs the content behind it), never to the dense data tables/lists, where full opacity and contrast matter more than visual flair.
+
+Verified with a Playwright render (light + dark, Send + Agents tabs, tab-switching) that everything still renders and functions correctly.
