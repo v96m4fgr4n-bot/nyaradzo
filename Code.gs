@@ -199,6 +199,7 @@ function getAgentPolicyCounts(fileId) {
     var sourceSS = SpreadsheetApp.openById(sourceFileId);
     var sourceSheet = sourceSS.getSheets()[0];
     var allData = sourceSheet.getDataRange().getValues();
+    var headers = allData[0] || [];
     var dataRows = allData.slice(1);
     var AGENT_COL = 9; // Column J — the current Easipol export has Status in Column I, Agent in Column J (shifted one column from the originally documented layout)
     var counts = {};
@@ -213,7 +214,21 @@ function getAgentPolicyCounts(fileId) {
     var result = Object.keys(counts).map(function(name) {
       return { name: name, count: counts[name], known: !!knownNames[name.trim().toLowerCase()] };
     }).sort(function(a,b) { return b.count - a.count; });
-    return { total: dataRows.length, agents: result };
+
+    // Diagnostic: expose the actual column layout (letter, header text, a
+    // sample value) so a shifted/changed export format is visible in the UI
+    // instead of silently producing a wrong or empty agent breakdown.
+    var sampleRow = dataRows.length ? dataRows[0] : [];
+    function colLetter_(n) {
+      n = n + 1; var s = "";
+      while (n > 0) { var rem = (n - 1) % 26; s = String.fromCharCode(65 + rem) + s; n = Math.floor((n - 1) / 26); }
+      return s;
+    }
+    var columns = headers.map(function(h, i) {
+      return { letter: colLetter_(i), header: h, sample: sampleRow[i], isAgentCol: i === AGENT_COL };
+    });
+
+    return { total: dataRows.length, agents: result, columns: columns };
   } catch(e) {
     return { error: e.message };
   } finally {

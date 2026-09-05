@@ -802,6 +802,16 @@ function loadPreview() {
       var unmatchedTotal = unmatched.reduce(function(s,a){ return s+a.count; }, 0);
       var html = '<div style="padding:10px 18px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);">'+
         '<strong style="color:var(--navy)">'+data.total+'</strong> total policies across <strong style="color:var(--navy)">'+data.agents.length+'</strong> agents</div>';
+      if (data.columns && data.columns.length) {
+        html += '<div style="padding:10px 18px;border-bottom:1px solid var(--border);">'+
+          '<div style="font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Detected columns in this file (the highlighted one is read as the agent name)</div>'+
+          '<div style="display:flex;flex-wrap:wrap;gap:6px;">'+
+          data.columns.map(function(c){
+            var label = c.letter+': '+escHtml(c.header||'(blank header)')+(c.sample!==undefined && c.sample!==''?' — e.g. "'+escHtml(c.sample)+'"':'');
+            return '<span style="font-size:10px;padding:3px 8px;border-radius:6px;border:1px solid '+(c.isAgentCol?'var(--gold)':'var(--border)')+';background:'+(c.isAgentCol?'var(--gold-dim)':'transparent')+';color:'+(c.isAgentCol?'var(--navy)':'var(--muted)')+';font-weight:'+(c.isAgentCol?'700':'400')+';">'+label+'</span>';
+          }).join('')+
+          '</div></div>';
+      }
       if (unmatched.length) {
         html += '<div style="padding:10px 18px;font-size:11px;color:var(--danger);border-bottom:1px solid var(--border);background:var(--danger-dim,rgba(220,50,50,0.08));">'+
           '⚠ '+unmatchedTotal+' polic'+(unmatchedTotal===1?'y':'ies')+' across '+unmatched.length+' name(s) not in the agent list — they will NOT be sent to anyone. '+
